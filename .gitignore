@@ -1,0 +1,13 @@
+# Environment / secrets (commit .env.example with placeholder names only)
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Language-specific entries added once the stack is chosen
