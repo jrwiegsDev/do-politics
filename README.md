@@ -4,7 +4,7 @@ People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running; no application code yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against Illinois's 17 congressional districts. No application code yet.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -74,6 +74,22 @@ The database listens on `127.0.0.1:5433` by default, so it doesn't collide with 
 The image is built from `db/Dockerfile`: the official `postgres:18` image plus the PostGIS packages. The official `postgis/postgis` image has no arm64 build, so building our own keeps it native on Apple silicon.
 
 To stop the database, run `docker compose down`. Data is kept in a named volume. To delete the data as well, run `docker compose down -v`.
+
+## District lookup
+
+The `districts` table (`db/init/002_districts.sql`) holds one row per district, with its boundary as a PostGIS `MultiPolygon` in NAD83 (SRID 4269), the coordinate system the Census publishes in. Each row has `effective_from` and `effective_to` dates so a redrawn map can sit alongside the one it replaces.
+
+Finding the district for a point is one query. Longitude comes first.
+
+```sql
+SELECT code, name
+FROM districts
+WHERE ST_Contains(boundary, ST_Point(:longitude, :latitude, 4269));
+```
+
+A GiST index on `boundary` keeps this fast. The index compares the point against each district's bounding box first, so the exact geometry check only runs on the one or two districts that could match. With Illinois loaded, the lookup takes about a millisecond.
+
+Only Illinois is loaded so far, from the Census file `tl_2025_17_cd119`. The load is done by hand for now; a repeatable loader for all states comes next.
 
 ## Data sources
 
