@@ -10,7 +10,10 @@
 .vscode/
 .idea/
 
-# Language-specific entries added once the stack is chosen
+# Python
+.venv/
+__pycache__/
+*.pyc
 
 # Downloaded source data (shapefiles etc.)
 data/

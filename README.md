@@ -4,7 +4,7 @@ People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against Illinois's 17 congressional districts. No application code yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against Illinois's 17 congressional districts, which a repeatable Python loader pulls from the Census. No API or web app yet.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -42,6 +42,8 @@ Vote and bill summaries are generated. Each one is labeled as generated, links t
 | API | Python, FastAPI |
 | Database | PostgreSQL + PostGIS |
 | Cache | Redis |
+| Ingestion | Python, psycopg, pyshp |
+| Dependencies | uv |
 | Local dev | Docker Compose (Postgres 18 + PostGIS 3.6) |
 | Testing | pytest, Playwright end-to-end |
 | CI | GitHub Actions |
@@ -69,6 +71,12 @@ Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or an
    docker compose ps
    ```
 
+4. Load the Illinois district boundaries. This needs [uv](https://docs.astral.sh/uv/), which installs the Python dependencies on first run.
+
+   ```
+   uv run --env-file .env python -m ingest.congressional_districts --state 17
+   ```
+
 The database listens on `127.0.0.1:5433` by default, so it doesn't collide with a Postgres already running on 5432. Change `POSTGRES_PORT` in `.env` to use another port.
 
 The image is built from `db/Dockerfile`: the official `postgres:18` image plus the PostGIS packages. The official `postgis/postgis` image has no arm64 build, so building our own keeps it native on Apple silicon.
@@ -89,7 +97,17 @@ WHERE ST_Contains(boundary, ST_Point(:longitude, :latitude, 4269));
 
 A GiST index on `boundary` keeps this fast. The index compares the point against each district's bounding box first, so the exact geometry check only runs on the one or two districts that could match. With Illinois loaded, the lookup takes about a millisecond.
 
-Only Illinois is loaded so far, from the Census file `tl_2025_17_cd119`. The load is done by hand for now; a repeatable loader for all states comes next.
+### Loading boundaries
+
+`ingest/congressional_districts.py` downloads a state's TIGER/Line file, reads the shapefile in Python and upserts each district. It takes the state's FIPS code:
+
+```
+uv run --env-file .env python -m ingest.congressional_districts --state 17
+```
+
+The load is idempotent. A unique constraint on `(level, chamber, geoid, effective_from)` identifies a district on a given map, and the insert uses `ON CONFLICT ... DO UPDATE`, so a second run updates the same rows instead of adding duplicates. Add `--dry-run` to read the file and print the rows without writing anything.
+
+The loader connects with `DATABASE_URL` if it's set, and otherwise with the `POSTGRES_*` values from `.env`. Only Illinois (FIPS 17) has been loaded so far.
 
 ## Data sources
 
