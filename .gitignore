@@ -11,3 +11,6 @@
 .idea/
 
 # Language-specific entries added once the stack is chosen
+
+# Downloaded source data (shapefiles etc.)
+data/
