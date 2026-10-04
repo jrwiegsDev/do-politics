@@ -21,6 +21,12 @@ TIGER_URL = "https://www2.census.gov/geo/tiger/TIGER{vintage}/CD/{name}.zip"
 # The Census marks water and other areas outside any district with this code.
 NOT_A_DISTRICT = "ZZ"
 
+# A map takes effect the day the first Congress elected under it is seated.
+# Most states have used one map since the 118th Congress (seated 2023-01-03).
+# Alabama, Georgia, Louisiana, New York and North Carolina redrew before the
+# 2024 election, so their current maps date from the 119th (seated 2025-01-03).
+REDRAWN_FOR_119TH = {"01", "13", "22", "36", "37"}
+
 UPSERT_SQL = """
 INSERT INTO districts (level, chamber, state_fips, code, geoid, name, effective_from, source, boundary)
 VALUES (%(level)s, %(chamber)s, %(state_fips)s, %(code)s, %(geoid)s, %(name)s, %(effective_from)s, %(source)s, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%(boundary)s), 4269)))
@@ -45,6 +51,11 @@ def fetch(name: str, vintage: int) -> Path:
             zf.extractall(extracted)
 
     return extracted / f"{name}.shp"
+
+
+def effective_from_for(state: str) -> date:
+    """Return the date the state's 119th Congress map took effect."""
+    return date(2025, 1, 3) if state in REDRAWN_FOR_119TH else date(2023, 1, 3)
 
 
 def read_districts(shp_path: Path, congress: int, effective_from: date):
@@ -92,14 +103,17 @@ def main() -> None:
     parser.add_argument(
         "--effective-from",
         type=date.fromisoformat,
-        default=date(2023, 1, 3),
-        help="date the map took effect (YYYY-MM-DD)",
+        help="date the map took effect (YYYY-MM-DD); looked up by state for the 119th Congress",
     )
     parser.add_argument("--dry-run", action="store_true", help="read the file and print rows without touching the database")
     args = parser.parse_args()
 
+    if args.effective_from is None and args.congress != 119:
+        parser.error("--effective-from is required for any Congress other than the 119th")
+    effective_from = args.effective_from or effective_from_for(args.state)
+
     name = f"tl_{args.vintage}_{args.state}_cd{args.congress}"
-    rows = list(read_districts(fetch(name, args.vintage), args.congress, args.effective_from))
+    rows = list(read_districts(fetch(name, args.vintage), args.congress, effective_from))
 
     if args.dry_run:
         for row in rows:

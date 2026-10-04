@@ -92,8 +92,12 @@ Finding the district for a point is one query. Longitude comes first.
 ```sql
 SELECT code, name
 FROM districts
-WHERE ST_Contains(boundary, ST_Point(:longitude, :latitude, 4269));
+WHERE ST_Contains(boundary, ST_Point(:longitude, :latitude, 4269))
+  AND effective_from <= current_date
+  AND (effective_to IS NULL OR effective_to > current_date);
 ```
+
+The two date conditions keep the lookup on the map in force today. A redrawn map can be loaded ahead of time with a future `effective_from`, and the lookup switches to it on that date with no code change or deploy.
 
 A GiST index on `boundary` keeps this fast. The index compares the point against each district's bounding box first, so the exact geometry check only runs on the one or two districts that could match. With Illinois loaded, the lookup takes about a millisecond.
 
@@ -107,7 +111,9 @@ uv run --env-file .env python -m ingest.congressional_districts --state 17
 
 The load is idempotent. A unique constraint on `(level, chamber, geoid, effective_from)` identifies a district on a given map, and the insert uses `ON CONFLICT ... DO UPDATE`, so a second run updates the same rows instead of adding duplicates. Add `--dry-run` to read the file and print the rows without writing anything.
 
-The loader connects with `DATABASE_URL` if it's set, and otherwise with the `POSTGRES_*` values from `.env`. Only Illinois (FIPS 17) has been loaded so far.
+The loader connects with `DATABASE_URL` if it's set, and otherwise with the `POSTGRES_*` values from `.env`. Illinois (FIPS 17) and Missouri (FIPS 29) have been loaded so far.
+
+Each map's `effective_from` is the date the first Congress elected under it was seated: 2023-01-03 for most states, and 2025-01-03 for the five that redrew before the 2024 election (Alabama, Georgia, Louisiana, New York, North Carolina). The loader looks this up by state.
 
 ## Data sources
 
