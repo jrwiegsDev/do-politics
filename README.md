@@ -155,7 +155,7 @@ Each map's `effective_from` is the date the first Congress elected under it was 
 uv run --env-file .env pytest
 ```
 
-The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Missouri's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing.
+The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing.
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 

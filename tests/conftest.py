@@ -1,4 +1,4 @@
-"""Shared test setup: a throwaway database with the schema and Missouri loaded."""
+"""Shared test setup: a throwaway database with the schema and Illinois loaded."""
 
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from ingest.congressional_districts import effective_from_for, load_state
 from ingest.db import connect
 
 TEST_DB = "dopolitics_test"
-MISSOURI = "29"
+ILLINOIS = "17"
 VINTAGE = 2025
 CONGRESS = 119
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -41,8 +41,8 @@ def database():
             test_env.setenv("POSTGRES_DB", TEST_DB)
             command.upgrade(Config(ALEMBIC_INI), "head")
             with connect() as conn:
-                name = f"tl_{VINTAGE}_{MISSOURI}_cd{CONGRESS}"
-                load_state(conn, name, VINTAGE, CONGRESS, effective_from_for(MISSOURI))
+                name = f"tl_{VINTAGE}_{ILLINOIS}_cd{CONGRESS}"
+                load_state(conn, name, VINTAGE, CONGRESS, effective_from_for(ILLINOIS))
 
             yield
 
