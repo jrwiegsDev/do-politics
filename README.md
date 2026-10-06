@@ -1,10 +1,12 @@
 # DoPolitics
 
+[![CI](https://github.com/jrwiegsDev/do-politics/actions/workflows/ci.yml/badge.svg)](https://github.com/jrwiegsDev/do-politics/actions/workflows/ci.yml)
+
 People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. No API or web app yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. No API or web app yet.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -111,14 +113,16 @@ The `districts` table (`migrations/versions/0001_baseline.py`) holds one row per
 Finding the district for a point is one query. Longitude comes first.
 
 ```sql
-SELECT code, name
+SELECT state_fips, code, name
 FROM districts
 WHERE ST_Contains(boundary, ST_Point(:longitude, :latitude, 4269))
-  AND effective_from <= current_date
-  AND (effective_to IS NULL OR effective_to > current_date);
+  AND effective_from <= :on_date
+  AND (effective_to IS NULL OR effective_to > :on_date);
 ```
 
-The two date conditions keep the lookup on the map in force today. A redrawn map can be loaded ahead of time with a future `effective_from`, and the lookup switches to it on that date with no code change or deploy.
+The query lives in `find_district` in `app/districts.py`. It takes the date as a parameter, which defaults to today, so the tests can check the date filter against a fixed day.
+
+The two date conditions keep the lookup on the map in force on that date. A redrawn map can be loaded ahead of time with a future `effective_from`, and the lookup switches to it on that date with no code change or deploy.
 
 A GiST index on `boundary` keeps this fast. The index compares the point against each district's bounding box first, so the exact geometry check only runs on the one or two districts that could match. With all 441 districts loaded, the lookup still runs in about a millisecond.
 
@@ -144,6 +148,16 @@ ORDER BY started_at DESC;
 ```
 
 Each map's `effective_from` is the date the first Congress elected under it was seated: 2023-01-03 for most states, and 2025-01-03 for the five that redrew before the 2024 election (Alabama, Georgia, Louisiana, New York, North Carolina). The loader looks this up by state.
+
+## Tests
+
+```
+uv run --env-file .env pytest
+```
+
+The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Missouri's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing.
+
+GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 
 ## Data sources
 
