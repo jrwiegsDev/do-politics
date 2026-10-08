@@ -51,6 +51,11 @@ def database():
 
 @pytest.fixture
 def conn(database):
-    """Give each test its own connection to the test database."""
+    """Give each test its own connection to the test database.
+
+    Whatever a test writes is rolled back afterwards, so every test starts
+    from the same data: the schema plus Illinois's districts.
+    """
     with connect() as conn:
         yield conn
+        conn.rollback()

@@ -6,7 +6,7 @@ People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. No API or web app yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. No API or web app yet.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -86,6 +86,12 @@ Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or an
    uv run --env-file .env python -m ingest.congressional_districts --state all
    ```
 
+6. Load the current members of Congress. This is one small download and takes a few seconds.
+
+   ```
+   uv run --env-file .env python -m ingest.officials
+   ```
+
 The database listens on `127.0.0.1:5433` by default, so it doesn't collide with a Postgres already running on 5432. Change `POSTGRES_PORT` in `.env` to use another port.
 
 The image is built from `db/Dockerfile`: the official `postgres:18` image plus the PostGIS packages. The official `postgis/postgis` image has no arm64 build, so building our own keeps it native on Apple silicon.
@@ -102,7 +108,7 @@ uv run --env-file .env alembic upgrade head
 
 Each migration runs in a transaction, so a failure leaves the schema unchanged. Alembic connects through the same `ingest/db.py` function as the ingestion jobs, so no database URL or password is kept in `alembic.ini`.
 
-To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0003`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
+To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0004`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
 
 The only SQL outside the migrations is `db/init/001_extensions.sql`, which enables PostGIS when the local container is first created so its health check can pass.
 
@@ -149,13 +155,27 @@ ORDER BY started_at DESC;
 
 Each map's `effective_from` is the date the first Congress elected under it was seated: 2023-01-03 for most states, and 2025-01-03 for the five that redrew before the 2024 election (Alabama, Georgia, Louisiana, New York, North Carolina). The loader looks this up by state.
 
+## Officials
+
+The `officials` table (`migrations/versions/0003_officials.py`) holds one row per sitting member of Congress: name, party, chamber, state, term dates and DC office contacts (phone, address, website, and a contact form where one is published). A vacant seat has no row, so the app can say a seat is vacant instead of showing a placeholder.
+
+`ingest/officials.py` loads it from [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators):
+
+```
+uv run --env-file .env python -m ingest.officials
+```
+
+The source and the Census describe a seat differently, and the loader translates once at load time so a district joins to its representative on a plain equality match. `IL` becomes FIPS `17`, and district `13` becomes the text `13`. The source uses district `0` for two cases, which become `00` for a state with a single at-large seat and `98` for the six non-voting seats, matching the Census codes.
+
+The load is idempotent, keyed on the member's Bioguide ID, which stays the same if a member moves from the House to the Senate. Members who are no longer in the file are removed in the same transaction. A download with fewer than 500 members is treated as broken and refused, since loading it would remove everyone it leaves out. Each run is recorded in `ingestion_runs`. Add `--dry-run` to print the rows without writing anything.
+
 ## Tests
 
 ```
 uv run --env-file .env pytest
 ```
 
-The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing.
+The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials tests use made-up members rather than the live file, so they don't fail when a real member leaves office.
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 
