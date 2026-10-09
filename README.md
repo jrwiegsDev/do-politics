@@ -6,7 +6,7 @@ People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. No web app yet, and no votes.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has served in the current Congress, including members who have left, as groundwork for loading votes. No web app yet, and no votes.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -92,7 +92,13 @@ Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or an
    uv run --env-file .env python -m ingest.officials
    ```
 
-7. Start the API. `--reload` restarts it when a file changes.
+7. Load everyone who has served in the current Congress. This downloads a larger file (about 13 MB) and takes a few seconds longer.
+
+   ```
+   uv run --env-file .env python -m ingest.members
+   ```
+
+8. Start the API. `--reload` restarts it when a file changes.
 
    ```
    uv run --env-file .env uvicorn app.main:app --reload
@@ -116,7 +122,7 @@ uv run --env-file .env alembic upgrade head
 
 Each migration runs in a transaction, so a failure leaves the schema unchanged. Alembic connects through the same `ingest/db.py` function as the ingestion jobs, so no database URL or password is kept in `alembic.ini`.
 
-To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0004`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
+To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0005`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
 
 The only SQL outside the migrations is `db/init/001_extensions.sql`, which enables PostGIS when the local container is first created so its health check can pass.
 
@@ -181,6 +187,20 @@ The load is idempotent, keyed on the member's Bioguide ID, which stays the same 
 
 `find_officials` in `app/officials.py` returns the sitting members for a state and district: the senators first, then the representative. It filters on term dates the same way the district lookup filters on map dates, so a member whose term has ended is left out even if the data hasn't been refreshed. The end date is exclusive, so a term ending on January 3 and its successor starting that day never both match.
 
+## Members
+
+`officials` answers "who holds this seat today", and it drops a member the day they leave office. Votes are cast by people, and a member's votes outlast their seat. The `members` table (`migrations/versions/0004_members.py`) is the record of the people: one row for everyone who has served in the 119th Congress, sitting or departed, and nobody is ever removed from it.
+
+`ingest/members.py` loads it from the same project, reading both the current and the historical file and keeping anyone with a term that ran past January 3, 2025, the day this Congress convened:
+
+```
+uv run --env-file .env python -m ingest.members
+```
+
+Each row holds the member's Bioguide ID, their name, and their Senate LIS ID if they have served there. The House publishes its votes by Bioguide ID and the Senate by LIS ID, so this table is what lets a Senate vote be tied to the same person as everything else. The LIS ID is unique, so two people can never share one.
+
+The load is idempotent, keyed on the Bioguide ID. When a member leaves office the source moves them from the current file to the historical one, and the next run updates their row to match. A read with fewer than 500 people is treated as broken and refused. Each run is recorded in `ingestion_runs`. Add `--dry-run` to print the rows without writing anything.
+
 ## API
 
 The API is a FastAPI app in `app/main.py`.
@@ -223,7 +243,7 @@ The lookup is a `POST` with the address in the request body on purpose. A `GET` 
 uv run --env-file .env pytest
 ```
 
-The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials tests use made-up members rather than the live file, so they don't fail when a real member leaves office. The geocoder and API tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
+The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials and members tests use made-up members rather than the live files, so they don't fail when a real member leaves office. The geocoder and API tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 
@@ -233,6 +253,6 @@ GitHub Actions runs the same steps on every push and pull request (`.github/work
 |---|---|
 | [Census Geocoder](https://geocoding.geo.census.gov/) | Address to coordinates |
 | [Census TIGER/Line](https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html) | District boundaries |
-| [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) | Current members, IDs, office contacts |
+| [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) | Current and former members, IDs, office contacts |
 | [Congress.gov API](https://api.congress.gov/) | Bills, actions, official summaries |
 | [House Clerk](https://clerk.house.gov/) / [Senate.gov](https://www.senate.gov/) | Roll-call votes |
