@@ -6,7 +6,7 @@ People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has ever served in Congress, and a fourth loads every roll call vote of the current Congress from the House Clerk and the Senate, with each member's position. No web app yet, and the API does not serve votes yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has ever served in Congress, and a fourth loads every roll call vote of the current Congress from the House Clerk and the Senate, with each member's position. A second endpoint returns a member's most recent votes. No web app yet.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -129,7 +129,7 @@ uv run --env-file .env alembic upgrade head
 
 Each migration runs in a transaction, so a failure leaves the schema unchanged. Alembic connects through the same `ingest/db.py` function as the ingestion jobs, so no database URL or password is kept in `alembic.ini`.
 
-To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0006`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
+To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0007`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
 
 The only SQL outside the migrations is `db/init/001_extensions.sql`, which enables PostGIS when the local container is first created so its health check can pass.
 
@@ -221,7 +221,21 @@ uv run --env-file .env python -m ingest.votes --chamber house --session 2
 uv run --env-file .env python -m ingest.votes --chamber senate --session 1
 ```
 
-Every roll call is loaded, including quorum calls and procedural votes, and each position is stored exactly as the chamber spells it. That is `Yea` and `Nay` on some votes, `Aye` and `No` on others, `Present`, `Not Voting`, and in the election of the Speaker a candidate's name. Deciding which votes to show is left to the code that reads them.
+Every roll call is loaded, including quorum calls and procedural votes, and each position is stored exactly as the chamber spells it. That is `Yea` and `Nay` on some votes, `Aye` and `No` on others, `Present`, `Not Voting`, and in the election of the Speaker a candidate's name.
+
+Neither chamber says which votes are final and which are steps along the way, so the loader gives each vote a category, stored in a column added by `migrations/versions/0006_vote_category.py`:
+
+| Category | What it covers |
+|---|---|
+| `legislation` | Final votes on a bill or resolution: passage, accepting the other chamber's version, a veto override |
+| `nomination` | Senate confirmations |
+| `procedural` | Everything else: amendments, cloture, motions to proceed, recommit or table, quorum calls |
+
+The rule is `categorize` in `ingest/categories.py`. It reads the vote's question, and for two questions that cover both kinds of vote it reads the title too: a House resolution is `legislation` unless it is a rule setting the terms for debating a bill, and the Senate's catch-all "On the Motion" is `legislation` only for a motion to accept the House's version. A question wording the rule has never seen counts as `procedural`, so nothing is shown as a final vote by mistake, and the loader reports it. When the rule changes, this re-labels the stored votes without downloading anything:
+
+```
+uv run --env-file .env python -m ingest.votes --recategorize
+```
 
 The two chambers publish different formats, so each has its own parser, and both produce the same rows. The differences they absorb:
 
@@ -241,6 +255,7 @@ The API is a FastAPI app in `app/main.py`.
 |---|---|---|
 | `GET` | `/health` | Confirms the API is up and can reach the database |
 | `POST` | `/lookup` | Takes a street address, returns the district and its members of Congress |
+| `GET` | `/members/{bioguide_id}/votes` | Returns a member's most recent votes, newest first |
 
 ```
 curl -X POST http://127.0.0.1:8000/lookup \
@@ -268,6 +283,44 @@ A request runs three steps: `geocode` in `app/geocoder.py` asks the Census Geoco
 | Census Geocoder unreachable | `503` |
 
 The lookup is a `POST` with the address in the request body on purpose. A `GET` would put the address in the URL, and URLs are written to access logs by web servers and proxies. The HTTP client's own request logging is turned down for the same reason, and a geocoder failure is reported by its type only, because the full error message contains the request URL.
+
+### A member's votes
+
+```
+curl "http://127.0.0.1:8000/members/B001315/votes?limit=2"
+```
+
+```json
+{
+  "member": {"bioguide_id": "B001315", "name": "Nikki Budzinski"},
+  "votes": [
+    {
+      "chamber": "house", "congress": 119, "session": 2, "roll_number": 314,
+      "voted_at": "2026-09-16T23:05:00Z",
+      "question": "On Motion to Suspend the Rules and Pass",
+      "issue": "S 2403", "title": "Retire through Ownership Act",
+      "result": "Passed", "category": "legislation",
+      "source_url": "https://clerk.house.gov/evs/2026/roll314.xml",
+      "position": "Yea"
+    }
+  ]
+}
+```
+
+`find_recent_votes` in `app/votes.py` joins `vote_positions` to `votes` for one member. The member's ID comes from the `/lookup` response. It is a public identifier, unlike an address, so it is part of the URL.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `limit` | `20` | How many votes to return, from 1 to 100 |
+| `show` | `final` | `final` returns final votes on legislation and Senate confirmations. `all` adds procedural votes |
+
+| Outcome | Response |
+|---|---|
+| Member found | `200` with the member and a list of votes, which is empty if they have none |
+| No member has that ID | `404` |
+| Malformed ID, `limit` out of range, or unknown `show` | `422` |
+
+Times are exact moments in UTC. Each vote links to the chamber's own record of it.
 
 ## Tests
 

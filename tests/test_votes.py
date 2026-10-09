@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import psycopg
 import pytest
 
-from ingest.members import UPSERT_SQL as UPSERT_MEMBER_SQL
+from helpers import MEMBERS, add_members
 from ingest.votes import (
     EASTERN,
     check_belongs,
@@ -19,6 +19,7 @@ from ingest.votes import (
     load,
     parse_house,
     parse_senate,
+    recategorize,
     save,
     senate_menu_url,
     senate_url,
@@ -97,11 +98,6 @@ SENATE_MENU_XML = """
 
 BIOGUIDE_BY_LIS = {"S900": "T000001", "S901": "T000002"}
 
-MEMBERS = [
-    {"bioguide_id": "T000001", "lis_id": "S900", "name": "Pat Example", "source": "legislators-current"},
-    {"bioguide_id": "T000002", "lis_id": "S901", "name": "Sam Sample", "source": "legislators-current"},
-]
-
 
 def house(number: int = 100) -> ET.Element:
     """A made-up House roll call with the given number."""
@@ -111,12 +107,6 @@ def house(number: int = 100) -> ET.Element:
 def senate(number: int = 7) -> ET.Element:
     """A made-up Senate vote with the given number."""
     return ET.fromstring(SENATE_XML.replace("<vote_number>7<", f"<vote_number>{number}<"))
-
-
-def add_members(conn) -> None:
-    """Insert the two made-up members the sample votes refer to."""
-    for member in MEMBERS:
-        conn.execute(UPSERT_MEMBER_SQL, member)
 
 
 def count(conn, table: str) -> int:
@@ -145,7 +135,7 @@ def committing_conn(conn):
     conn.rollback()
     conn.execute("DELETE FROM votes")
     conn.execute("DELETE FROM members WHERE bioguide_id = ANY(%s)", [[member["bioguide_id"] for member in MEMBERS]])
-    conn.execute("DELETE FROM ingestion_runs WHERE job LIKE 'votes-%'")
+    conn.execute("DELETE FROM ingestion_runs WHERE job LIKE 'votes-%'")  # also matches votes-categories
     conn.commit()
 
 
@@ -335,6 +325,48 @@ def test_load_saves_new_votes_and_a_second_run_finds_none(committing_conn, monke
 
     assert (first, second) == (2, 0)
     assert count(committing_conn, "votes") == 2
+
+
+def test_saved_vote_carries_its_category(conn):
+    add_members(conn)
+    vote, positions = parse_house(house(), "https://example.test/roll100.xml")
+
+    save(conn, vote, positions)
+
+    assert conn.execute("SELECT category FROM votes").fetchone()[0] == "legislation"
+
+
+def test_category_outside_the_three_is_refused(conn):
+    add_members(conn)
+    vote, positions = parse_house(house(), "https://example.test/roll100.xml")
+    save(conn, vote, positions)
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("UPDATE votes SET category = 'important'")
+
+
+def test_recategorize_corrects_a_stale_category_and_reports_no_unknowns(committing_conn):
+    add_members(committing_conn)
+    vote, positions = parse_house(house(), "https://example.test/roll100.xml")
+    save(committing_conn, vote, positions)
+    committing_conn.execute("UPDATE votes SET category = 'procedural'")
+
+    changed, unknown = recategorize(committing_conn)
+
+    assert (changed, unknown) == (1, [])
+    assert committing_conn.execute("SELECT category FROM votes").fetchone()[0] == "legislation"
+
+
+def test_recategorize_reports_a_question_with_no_rule(committing_conn):
+    add_members(committing_conn)
+    root = ET.fromstring(HOUSE_XML.replace("On Passage", "On Something New"))
+    vote, positions = parse_house(root, "https://example.test/roll100.xml")
+    save(committing_conn, vote, positions)
+
+    changed, unknown = recategorize(committing_conn)
+
+    assert changed == 0
+    assert [v["question"] for v in unknown] == ["On Something New"]
 
 
 def test_load_stops_at_the_limit(committing_conn, monkeypatch, no_waiting):

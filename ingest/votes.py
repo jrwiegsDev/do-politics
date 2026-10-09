@@ -6,6 +6,7 @@ Usage:
     uv run --env-file .env python -m ingest.votes --chamber house --session 2
     uv run --env-file .env python -m ingest.votes --chamber senate --session 2
     uv run --env-file .env python -m ingest.votes --chamber house --session 2 --limit 3
+    uv run --env-file .env python -m ingest.votes --recategorize
 """
 
 import argparse
@@ -17,6 +18,9 @@ from itertools import islice
 from time import sleep
 from zoneinfo import ZoneInfo
 
+from psycopg.rows import dict_row
+
+from ingest.categories import categorize, is_known
 from ingest.db import connect
 from ingest.runs import record_run
 
@@ -53,11 +57,11 @@ WHERE lis_id IS NOT NULL;
 UPSERT_VOTE_SQL = """
 INSERT INTO votes (
     chamber, congress, session, roll_number, voted_at,
-    question, vote_type, issue, title, result, source_url
+    question, vote_type, issue, title, result, source_url, category
 )
 VALUES (
     %(chamber)s, %(congress)s, %(session)s, %(roll_number)s, %(voted_at)s,
-    %(question)s, %(vote_type)s, %(issue)s, %(title)s, %(result)s, %(source_url)s
+    %(question)s, %(vote_type)s, %(issue)s, %(title)s, %(result)s, %(source_url)s, %(category)s
 )
 ON CONFLICT (chamber, congress, session, roll_number)
 DO UPDATE SET
@@ -68,6 +72,7 @@ DO UPDATE SET
     title = EXCLUDED.title,
     result = EXCLUDED.result,
     source_url = EXCLUDED.source_url,
+    category = EXCLUDED.category,
     updated_at = now()
 RETURNING id;
 """
@@ -80,6 +85,19 @@ DO UPDATE SET
     position = EXCLUDED.position,
     party = EXCLUDED.party,
     state = EXCLUDED.state;
+"""
+
+STORED_VOTES_SQL = """
+SELECT id, chamber, question, title, category, source_url
+FROM votes
+ORDER BY id;
+"""
+
+SET_CATEGORY_SQL = """
+UPDATE votes
+SET category = %(category)s,
+    updated_at = now()
+WHERE id = %(id)s;
 """
 
 
@@ -216,8 +234,8 @@ def check_belongs(vote: dict, chamber: str, session: int) -> None:
 
 
 def save(conn, vote: dict, positions: list[dict]) -> None:
-    """Upsert one vote, then its positions under the id the database gave it."""
-    vote_id = conn.execute(UPSERT_VOTE_SQL, vote).fetchone()[0]
+    """Upsert one vote with its category, then its positions under the id the database gave it."""
+    vote_id = conn.execute(UPSERT_VOTE_SQL, vote | {"category": categorize(vote)}).fetchone()[0]
     with conn.cursor() as cur:
         cur.executemany(UPSERT_POSITION_SQL, [position | {"vote_id": vote_id} for position in positions])
 
@@ -244,16 +262,48 @@ def load(conn, chamber: str, session: int, limit: int | None = None) -> int:
             conn.commit()
             run.rows_loaded += 1
             print(f"{chamber} {vote['roll_number']}: {len(positions)} positions")
+            if not is_known(vote):
+                print(f"  new question wording, counted as procedural: {vote['question']!r}")
 
     return run.rows_loaded
 
 
+def recategorize(conn) -> tuple[int, list[dict]]:
+    """Apply the current category rules to every stored vote, as one recorded run.
+
+    Nothing is downloaded: the question and title are already stored. Returns
+    how many votes changed category, and the votes whose question has no rule.
+    """
+    with record_run(conn, "votes-categories", "ingest.categories") as run:
+        with conn.cursor(row_factory=dict_row) as cur:
+            votes = cur.execute(STORED_VOTES_SQL).fetchall()
+
+        changed = [vote for vote in votes if categorize(vote) != vote["category"]]
+        with conn.cursor() as cur:
+            cur.executemany(SET_CATEGORY_SQL, [{"id": vote["id"], "category": categorize(vote)} for vote in changed])
+        run.rows_loaded = len(changed)
+
+    return len(changed), [vote for vote in votes if not is_known(vote)]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--chamber", required=True, choices=sorted(SOURCES))
-    parser.add_argument("--session", required=True, type=int, choices=sorted(SESSION_YEARS))
+    parser.add_argument("--chamber", choices=sorted(SOURCES))
+    parser.add_argument("--session", type=int, choices=sorted(SESSION_YEARS))
     parser.add_argument("--limit", type=int, help="stop after this many votes")
+    parser.add_argument("--recategorize", action="store_true", help="re-apply the category rules to stored votes; downloads nothing")
     args = parser.parse_args()
+
+    if args.recategorize:
+        with connect() as conn:
+            changed, unknown = recategorize(conn)
+        print(f"{changed} votes changed category")
+        for vote in unknown:
+            print(f"  no rule for {vote['chamber']} question {vote['question']!r}: {vote['source_url']}")
+        return
+
+    if args.chamber is None or args.session is None:
+        parser.error("--chamber and --session are required unless --recategorize is given")
 
     with connect() as conn:
         loaded = load(conn, args.chamber, args.session, args.limit)
