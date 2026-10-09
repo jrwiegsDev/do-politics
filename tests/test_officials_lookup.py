@@ -2,8 +2,9 @@
 
 from datetime import date
 
-from app.officials import find_officials
 from helpers import MISSOURI_SENATOR, REP_12, REP_13, SENATOR_A, SENATOR_B, add, names
+
+from app.officials import find_officials
 
 ON_DATE = date(2026, 6, 1)
 

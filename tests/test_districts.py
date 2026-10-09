@@ -21,7 +21,9 @@ def test_point_in_the_ocean_has_no_district(conn):
 
 
 def test_lookup_before_the_map_took_effect_finds_nothing(conn):
-    district = find_district(conn, CAPITOL_LONGITUDE, CAPITOL_LATITUDE, on_date=date(2022, 6, 1))
+    district = find_district(
+        conn, CAPITOL_LONGITUDE, CAPITOL_LATITUDE, on_date=date(2022, 6, 1)
+    )
 
     assert district is None
 

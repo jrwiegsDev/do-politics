@@ -50,10 +50,14 @@ def record_run(conn: psycopg.Connection, job: str, source: str):
     run = Run(run_id)
     try:
         yield run
-        conn.execute(SUCCEED_RUN_SQL, {"run_id": run.id, "rows_loaded": run.rows_loaded})
+        conn.execute(
+            SUCCEED_RUN_SQL, {"run_id": run.id, "rows_loaded": run.rows_loaded}
+        )
         conn.commit()
     except BaseException as exc:
         conn.rollback()
-        conn.execute(FAIL_RUN_SQL, {"run_id": run.id, "error": f"{type(exc).__name__}: {exc}"})
+        conn.execute(
+            FAIL_RUN_SQL, {"run_id": run.id, "error": f"{type(exc).__name__}: {exc}"}
+        )
         conn.commit()
         raise

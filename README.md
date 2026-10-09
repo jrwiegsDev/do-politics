@@ -332,6 +332,17 @@ The tests need the database container running. They never touch the development 
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 
+## Code checks
+
+[Ruff](https://docs.astral.sh/ruff/) checks the code without running it. As a linter it flags likely mistakes, such as a function defined twice or an import that is never used. As a formatter it keeps the layout consistent, so a diff shows what changed and not how someone wrapped a line.
+
+```
+uv run ruff check .
+uv run ruff format .
+```
+
+`ruff check --fix .` applies the fixes it can make by itself. CI runs both checks on every push and pull request, and fails if either finds something. Migrations that have been pushed are excluded, since they are never edited.
+
 ## Data sources
 
 | Source | Used for |

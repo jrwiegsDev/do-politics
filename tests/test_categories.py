@@ -25,22 +25,35 @@ def test_house_final_votes_are_legislation(question):
 
 @pytest.mark.parametrize(
     "question",
-    ["On Agreeing to the Amendment", "On Motion to Recommit", "On Ordering the Previous Question", "Call of the House"],
+    [
+        "On Agreeing to the Amendment",
+        "On Motion to Recommit",
+        "On Ordering the Previous Question",
+        "Call of the House",
+    ],
 )
 def test_house_steps_along_the_way_are_procedural(question):
     assert categorize(vote("house", question)) == "procedural"
 
 
 def test_house_resolution_is_legislation():
-    title = "Directing the President, pursuant to section 5(c) of the War Powers Resolution"
+    title = (
+        "Directing the President, pursuant to section 5(c) of the War Powers Resolution"
+    )
 
-    assert categorize(vote("house", "On Agreeing to the Resolution", title)) == "legislation"
+    assert (
+        categorize(vote("house", "On Agreeing to the Resolution", title))
+        == "legislation"
+    )
 
 
 def test_house_rule_for_debating_a_bill_is_procedural():
     title = "Providing for consideration of the bill (H.R. 9999) to do something"
 
-    assert categorize(vote("house", "On Agreeing to the Resolution", title)) == "procedural"
+    assert (
+        categorize(vote("house", "On Agreeing to the Resolution", title))
+        == "procedural"
+    )
 
 
 def test_house_resolution_with_no_title_is_legislation():
@@ -51,12 +64,18 @@ def test_senate_confirmation_is_a_nomination():
     assert categorize(vote("senate", "On the Nomination")) == "nomination"
 
 
-@pytest.mark.parametrize("question", ["On Passage of the Bill", "On the Joint Resolution", "On the Resolution"])
+@pytest.mark.parametrize(
+    "question",
+    ["On Passage of the Bill", "On the Joint Resolution", "On the Resolution"],
+)
 def test_senate_final_votes_are_legislation(question):
     assert categorize(vote("senate", question)) == "legislation"
 
 
-@pytest.mark.parametrize("question", ["On the Cloture Motion", "On the Motion to Proceed", "On the Amendment"])
+@pytest.mark.parametrize(
+    "question",
+    ["On the Cloture Motion", "On the Motion to Proceed", "On the Amendment"],
+)
 def test_senate_steps_along_the_way_are_procedural(question):
     assert categorize(vote("senate", question)) == "procedural"
 

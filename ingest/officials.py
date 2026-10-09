@@ -110,7 +110,9 @@ def read_officials() -> list[dict]:
     """Download and transform every member, refusing a file that is too short."""
     rows = [to_row(member) for member in fetch()]
     if len(rows) < MIN_EXPECTED_MEMBERS:
-        raise ValueError(f"{SOURCE} has only {len(rows)} members; expected at least {MIN_EXPECTED_MEMBERS}")
+        raise ValueError(
+            f"{SOURCE} has only {len(rows)} members; expected at least {MIN_EXPECTED_MEMBERS}"
+        )
 
     return rows
 
@@ -124,7 +126,13 @@ def load(conn) -> tuple[int, int]:
         rows = read_officials()
         with conn.cursor() as cur:
             cur.executemany(UPSERT_SQL, rows)
-            cur.execute(DELETE_DEPARTED_SQL, {"source": SOURCE, "bioguide_ids": [row["bioguide_id"] for row in rows]})
+            cur.execute(
+                DELETE_DEPARTED_SQL,
+                {
+                    "source": SOURCE,
+                    "bioguide_ids": [row["bioguide_id"] for row in rows],
+                },
+            )
             removed = cur.rowcount
         run.rows_loaded = len(rows)
 
@@ -133,13 +141,22 @@ def load(conn) -> tuple[int, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dry-run", action="store_true", help="download and print rows without touching the database")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="download and print rows without touching the database",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
         rows = read_officials()
         for row in rows:
-            print(row["bioguide_id"], row["state"], row["district_code"] or "senate", row["name"])
+            print(
+                row["bioguide_id"],
+                row["state"],
+                row["district_code"] or "senate",
+                row["name"],
+            )
         print(f"{len(rows)} officials read from {SOURCE}; nothing written")
         return
 

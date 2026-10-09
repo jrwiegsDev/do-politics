@@ -14,7 +14,12 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.17.0",
 ]
+
+[tool.ruff]
+# A migration that has been pushed is never edited, so Ruff leaves them alone.
+extend-exclude = ["migrations/versions"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

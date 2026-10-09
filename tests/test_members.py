@@ -9,7 +9,13 @@ SENATOR = {
     "id": {"bioguide": "T000003", "lis": "S900"},
     "name": {"first": "Sam", "last": "Sample", "official_full": "Sam R. Sample"},
     "terms": [
-        {"type": "rep", "state": "IL", "district": 13, "start": "2019-01-03", "end": "2021-01-03"},
+        {
+            "type": "rep",
+            "state": "IL",
+            "district": 13,
+            "start": "2019-01-03",
+            "end": "2021-01-03",
+        },
         {"type": "sen", "state": "IL", "start": "2021-01-03", "end": "2027-01-03"},
     ],
 }
@@ -18,7 +24,13 @@ FORMER_MEMBER = {
     "id": {"bioguide": "T000004"},
     "name": {"first": "Pat", "last": "Example"},
     "terms": [
-        {"type": "rep", "state": "IL", "district": 12, "start": "2023-01-03", "end": "2025-01-03"},
+        {
+            "type": "rep",
+            "state": "IL",
+            "district": 12,
+            "start": "2023-01-03",
+            "end": "2025-01-03",
+        },
     ],
 }
 
@@ -64,7 +76,9 @@ def test_member_who_left_office_moves_to_the_historical_source(conn):
     conn.execute(UPSERT_SQL, to_row(SENATOR, "legislators-current"))
     conn.execute(UPSERT_SQL, to_row(SENATOR, "legislators-historical"))
 
-    source = conn.execute("SELECT source FROM members WHERE bioguide_id = 'T000003'").fetchone()[0]
+    source = conn.execute(
+        "SELECT source FROM members WHERE bioguide_id = 'T000003'"
+    ).fetchone()[0]
 
     assert source == "legislators-historical"
 
