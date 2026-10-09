@@ -3,7 +3,7 @@
 import psycopg
 import pytest
 
-from ingest.members import UPSERT_SQL, read_members, served_this_congress, to_row
+from ingest.members import UPSERT_SQL, read_members, to_row
 
 SENATOR = {
     "id": {"bioguide": "T000003", "lis": "S900"},
@@ -51,14 +51,6 @@ def test_name_falls_back_to_first_and_last():
     assert row["name"] == "Pat Example"
 
 
-def test_member_with_a_term_in_this_congress_served():
-    assert served_this_congress(SENATOR)
-
-
-def test_term_ending_the_day_congress_convened_did_not_serve():
-    assert not served_this_congress(FORMER_MEMBER)
-
-
 def test_upserting_a_member_twice_keeps_one_row(conn):
     conn.execute(UPSERT_SQL, to_row(SENATOR, "legislators-current"))
     conn.execute(UPSERT_SQL, to_row(SENATOR, "legislators-current"))
@@ -85,11 +77,14 @@ def test_two_members_cannot_share_an_lis_id(conn):
         conn.execute(UPSERT_SQL, impostor)
 
 
-def test_only_people_who_served_this_congress_are_read(monkeypatch):
+def test_people_from_both_files_are_read_with_their_source(monkeypatch):
     monkeypatch.setattr("ingest.members.MIN_EXPECTED_MEMBERS", 1)
     monkeypatch.setattr("ingest.members.fetch", lambda source: FILES[source])
 
-    assert read_members() == [to_row(SENATOR, "legislators-current")]
+    assert read_members() == [
+        to_row(SENATOR, "legislators-current"),
+        to_row(FORMER_MEMBER, "legislators-historical"),
+    ]
 
 
 def test_too_few_members_is_refused(monkeypatch):
