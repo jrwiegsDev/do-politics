@@ -1,7 +1,8 @@
 """Tests for looking up a member's recent votes."""
 
-from app.votes import ALL_CATEGORIES, find_recent_votes
 from helpers import add_members, add_vote
+
+from app.votes import ALL_CATEGORIES, find_recent_votes
 
 PAT = "T000001"
 SAM = "T000002"
@@ -63,7 +64,14 @@ def test_procedural_votes_are_left_out_by_default(conn):
 
 def test_confirmations_are_included_by_default(conn):
     add_members(conn)
-    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, question="On the Nomination", chamber="senate")
+    add_vote(
+        conn,
+        1,
+        day=5,
+        positions={PAT: "Yea"},
+        question="On the Nomination",
+        chamber="senate",
+    )
 
     votes = find_recent_votes(conn, PAT)
 

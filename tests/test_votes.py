@@ -5,12 +5,12 @@ downloads anything and none depends on a real member staying in office.
 """
 
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
-
 from helpers import MEMBERS, add_members
+
 from ingest.votes import (
     EASTERN,
     check_belongs,
@@ -101,12 +101,16 @@ BIOGUIDE_BY_LIS = {"S900": "T000001", "S901": "T000002"}
 
 def house(number: int = 100) -> ET.Element:
     """A made-up House roll call with the given number."""
-    return ET.fromstring(HOUSE_XML.replace("<rollcall-num>100<", f"<rollcall-num>{number}<"))
+    return ET.fromstring(
+        HOUSE_XML.replace("<rollcall-num>100<", f"<rollcall-num>{number}<")
+    )
 
 
 def senate(number: int = 7) -> ET.Element:
     """A made-up Senate vote with the given number."""
-    return ET.fromstring(SENATE_XML.replace("<vote_number>7<", f"<vote_number>{number}<"))
+    return ET.fromstring(
+        SENATE_XML.replace("<vote_number>7<", f"<vote_number>{number}<")
+    )
 
 
 def count(conn, table: str) -> int:
@@ -134,8 +138,13 @@ def committing_conn(conn):
     yield conn
     conn.rollback()
     conn.execute("DELETE FROM votes")
-    conn.execute("DELETE FROM members WHERE bioguide_id = ANY(%s)", [[member["bioguide_id"] for member in MEMBERS]])
-    conn.execute("DELETE FROM ingestion_runs WHERE job LIKE 'votes-%'")  # also matches votes-categories
+    conn.execute(
+        "DELETE FROM members WHERE bioguide_id = ANY(%s)",
+        [[member["bioguide_id"] for member in MEMBERS]],
+    )
+    conn.execute(
+        "DELETE FROM ingestion_runs WHERE job LIKE 'votes-%'"
+    )  # also matches votes-categories
     conn.commit()
 
 
@@ -160,7 +169,7 @@ def test_house_vote_becomes_a_row():
 def test_house_time_during_daylight_saving_is_four_hours_behind_utc():
     vote, _ = parse_house(house(), "https://example.test/roll100.xml")
 
-    assert vote["voted_at"] == datetime(2026, 3, 25, 19, 22, tzinfo=timezone.utc)
+    assert vote["voted_at"] == datetime(2026, 3, 25, 19, 22, tzinfo=UTC)
 
 
 def test_house_positions_carry_the_id_party_and_state():
@@ -168,12 +177,21 @@ def test_house_positions_carry_the_id_party_and_state():
 
     assert positions == [
         {"bioguide_id": "T000001", "position": "Yea", "party": "D", "state": "IL"},
-        {"bioguide_id": "T000002", "position": "Not Voting", "party": "R", "state": "IL"},
+        {
+            "bioguide_id": "T000002",
+            "position": "Not Voting",
+            "party": "R",
+            "state": "IL",
+        },
     ]
 
 
 def test_empty_house_description_becomes_none():
-    root = ET.fromstring(HOUSE_XML.replace("<vote-desc>Example Act</vote-desc>", "<vote-desc></vote-desc>"))
+    root = ET.fromstring(
+        HOUSE_XML.replace(
+            "<vote-desc>Example Act</vote-desc>", "<vote-desc></vote-desc>"
+        )
+    )
 
     vote, _ = parse_house(root, "https://example.test/roll100.xml")
 
@@ -201,11 +219,13 @@ def test_senate_vote_becomes_a_row():
 def test_senate_time_during_standard_time_is_five_hours_behind_utc():
     vote, _ = parse_senate(senate(), "https://example.test/vote7.xml", BIOGUIDE_BY_LIS)
 
-    assert vote["voted_at"] == datetime(2026, 1, 5, 22, 31, tzinfo=timezone.utc)
+    assert vote["voted_at"] == datetime(2026, 1, 5, 22, 31, tzinfo=UTC)
 
 
 def test_senate_positions_are_translated_to_bioguide_ids():
-    _, positions = parse_senate(senate(), "https://example.test/vote7.xml", BIOGUIDE_BY_LIS)
+    _, positions = parse_senate(
+        senate(), "https://example.test/vote7.xml", BIOGUIDE_BY_LIS
+    )
 
     assert positions == [
         {"bioguide_id": "T000001", "position": "Nay", "party": "D", "state": "IL"},
@@ -219,7 +239,9 @@ def test_senate_id_that_cannot_be_translated_is_refused():
 
 
 def test_senate_vote_with_no_document_has_no_issue():
-    root = ET.fromstring(SENATE_XML.replace("<document_name>PN99</document_name>", "<document_name/>"))
+    root = ET.fromstring(
+        SENATE_XML.replace("<document_name>PN99</document_name>", "<document_name/>")
+    )
 
     vote, _ = parse_senate(root, "https://example.test/vote7.xml", BIOGUIDE_BY_LIS)
 
@@ -228,7 +250,9 @@ def test_senate_vote_with_no_document_has_no_issue():
 
 def test_both_parsers_return_the_same_columns():
     house_vote, _ = parse_house(house(), "https://example.test/roll100.xml")
-    senate_vote, _ = parse_senate(senate(), "https://example.test/vote7.xml", BIOGUIDE_BY_LIS)
+    senate_vote, _ = parse_senate(
+        senate(), "https://example.test/vote7.xml", BIOGUIDE_BY_LIS
+    )
 
     assert house_vote.keys() == senate_vote.keys()
 
@@ -259,7 +283,9 @@ def test_saving_a_corrected_vote_updates_the_position(conn):
     corrected = [positions[0] | {"position": "Nay"}, positions[1]]
     save(conn, vote, corrected)
 
-    position = conn.execute("SELECT position FROM vote_positions WHERE bioguide_id = 'T000001'").fetchone()[0]
+    position = conn.execute(
+        "SELECT position FROM vote_positions WHERE bioguide_id = 'T000001'"
+    ).fetchone()[0]
 
     assert position == "Nay"
 
@@ -291,7 +317,10 @@ def test_member_with_a_vote_cannot_be_deleted(conn):
 
 
 def test_house_votes_stop_at_the_first_missing_roll_call(monkeypatch, no_waiting):
-    monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}))
+    monkeypatch.setattr(
+        "ingest.votes.fetch_xml",
+        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+    )
 
     found = [vote["roll_number"] for vote, _ in house_votes(2, after=0)]
 
@@ -299,26 +328,39 @@ def test_house_votes_stop_at_the_first_missing_roll_call(monkeypatch, no_waiting
 
 
 def test_house_votes_start_after_the_last_one_loaded(monkeypatch, no_waiting):
-    monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}))
+    monkeypatch.setattr(
+        "ingest.votes.fetch_xml",
+        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+    )
 
     found = [vote["roll_number"] for vote, _ in house_votes(2, after=1)]
 
     assert found == [2]
 
 
-def test_senate_votes_come_oldest_first_and_skip_those_already_loaded(monkeypatch, no_waiting):
+def test_senate_votes_come_oldest_first_and_skip_those_already_loaded(
+    monkeypatch, no_waiting
+):
     documents = {senate_menu_url(2): ET.fromstring(SENATE_MENU_XML)}
     documents |= {senate_url(2, number): senate(number) for number in (1, 2, 3)}
     monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch(documents))
 
-    found = [vote["roll_number"] for vote, _ in senate_votes(2, after=1, bioguide_by_lis=BIOGUIDE_BY_LIS)]
+    found = [
+        vote["roll_number"]
+        for vote, _ in senate_votes(2, after=1, bioguide_by_lis=BIOGUIDE_BY_LIS)
+    ]
 
     assert found == [2, 3]
 
 
-def test_load_saves_new_votes_and_a_second_run_finds_none(committing_conn, monkeypatch, no_waiting):
+def test_load_saves_new_votes_and_a_second_run_finds_none(
+    committing_conn, monkeypatch, no_waiting
+):
     add_members(committing_conn)
-    monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}))
+    monkeypatch.setattr(
+        "ingest.votes.fetch_xml",
+        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+    )
 
     first = load(committing_conn, "house", 2)
     second = load(committing_conn, "house", 2)
@@ -345,7 +387,9 @@ def test_category_outside_the_three_is_refused(conn):
         conn.execute("UPDATE votes SET category = 'important'")
 
 
-def test_recategorize_corrects_a_stale_category_and_reports_no_unknowns(committing_conn):
+def test_recategorize_corrects_a_stale_category_and_reports_no_unknowns(
+    committing_conn,
+):
     add_members(committing_conn)
     vote, positions = parse_house(house(), "https://example.test/roll100.xml")
     save(committing_conn, vote, positions)
@@ -354,7 +398,10 @@ def test_recategorize_corrects_a_stale_category_and_reports_no_unknowns(committi
     changed, unknown = recategorize(committing_conn)
 
     assert (changed, unknown) == (1, [])
-    assert committing_conn.execute("SELECT category FROM votes").fetchone()[0] == "legislation"
+    assert (
+        committing_conn.execute("SELECT category FROM votes").fetchone()[0]
+        == "legislation"
+    )
 
 
 def test_recategorize_reports_a_question_with_no_rule(committing_conn):
@@ -371,7 +418,10 @@ def test_recategorize_reports_a_question_with_no_rule(committing_conn):
 
 def test_load_stops_at_the_limit(committing_conn, monkeypatch, no_waiting):
     add_members(committing_conn)
-    monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}))
+    monkeypatch.setattr(
+        "ingest.votes.fetch_xml",
+        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+    )
 
     loaded = load(committing_conn, "house", 2, limit=1)
 

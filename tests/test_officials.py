@@ -4,13 +4,26 @@ from datetime import date
 
 import pytest
 
-from ingest.officials import DELETE_DEPARTED_SQL, UPSERT_SQL, district_code_for, read_officials, to_row
+from ingest.officials import (
+    DELETE_DEPARTED_SQL,
+    UPSERT_SQL,
+    district_code_for,
+    read_officials,
+    to_row,
+)
 
 HOUSE_MEMBER = {
     "id": {"bioguide": "T000001"},
     "name": {"first": "Pat", "last": "Example", "official_full": "Pat Q. Example"},
     "terms": [
-        {"type": "rep", "state": "IL", "district": 12, "party": "Republican", "start": "2023-01-03", "end": "2025-01-03"},
+        {
+            "type": "rep",
+            "state": "IL",
+            "district": 12,
+            "party": "Republican",
+            "start": "2023-01-03",
+            "end": "2025-01-03",
+        },
         {
             "type": "rep",
             "state": "IL",
@@ -29,7 +42,13 @@ SENATOR = {
     "id": {"bioguide": "T000002"},
     "name": {"first": "Sam", "last": "Sample"},
     "terms": [
-        {"type": "sen", "state": "IL", "party": "Independent", "start": "2023-01-03", "end": "2029-01-03"},
+        {
+            "type": "sen",
+            "state": "IL",
+            "party": "Independent",
+            "start": "2023-01-03",
+            "end": "2029-01-03",
+        },
     ],
 }
 
@@ -94,7 +113,9 @@ def test_upsert_updates_a_member_who_changed(conn):
     changed = to_row(HOUSE_MEMBER) | {"party": "Independent"}
     conn.execute(UPSERT_SQL, changed)
 
-    party = conn.execute("SELECT party FROM officials WHERE bioguide_id = 'T000001'").fetchone()[0]
+    party = conn.execute(
+        "SELECT party FROM officials WHERE bioguide_id = 'T000001'"
+    ).fetchone()[0]
 
     assert party == "Independent"
 
@@ -103,7 +124,10 @@ def test_departed_member_is_removed(conn):
     conn.execute(UPSERT_SQL, to_row(HOUSE_MEMBER))
     conn.execute(UPSERT_SQL, to_row(SENATOR))
 
-    conn.execute(DELETE_DEPARTED_SQL, {"source": "legislators-current", "bioguide_ids": ["T000001"]})
+    conn.execute(
+        DELETE_DEPARTED_SQL,
+        {"source": "legislators-current", "bioguide_ids": ["T000001"]},
+    )
 
     remaining = conn.execute("SELECT bioguide_id FROM officials").fetchall()
 

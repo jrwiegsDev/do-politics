@@ -6,6 +6,18 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Check for likely mistakes
+        run: uv run ruff check .
+      - name: Check the formatting
+        run: uv run ruff format --check .
+
   test:
     runs-on: ubuntu-latest
     steps:

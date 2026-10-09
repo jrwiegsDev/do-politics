@@ -4,10 +4,10 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from helpers import REP_13, SENATOR_A, SENATOR_B, add, add_members, add_vote
 
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
-from helpers import REP_13, SENATOR_A, SENATOR_B, add, add_members, add_vote
 
 CAPITOL = (-89.6548, 39.7984)
 MID_ATLANTIC = (-40.0, 35.0)
@@ -39,7 +39,9 @@ def test_health_reports_ok(client):
     assert response.json() == {"status": "ok"}
 
 
-def test_lookup_returns_the_district_senators_and_representative(client, conn, monkeypatch):
+def test_lookup_returns_the_district_senators_and_representative(
+    client, conn, monkeypatch
+):
     add(conn, seated(SENATOR_A), seated(SENATOR_B), seated(REP_13))
     geocode_to(monkeypatch, CAPITOL)
 
@@ -47,7 +49,11 @@ def test_lookup_returns_the_district_senators_and_representative(client, conn, m
     body = response.json()
 
     assert response.status_code == 200
-    assert body["district"] == {"state_fips": "17", "code": "13", "name": "Congressional District 13"}
+    assert body["district"] == {
+        "state_fips": "17",
+        "code": "13",
+        "name": "Congressional District 13",
+    }
     assert [s["name"] for s in body["senators"]] == ["Alex Senator", "Blake Senator"]
     assert body["representative"]["name"] == "Casey Rep"
 
@@ -106,14 +112,18 @@ def test_address_cannot_be_sent_in_the_url(client):
 def test_member_votes_returns_the_member_and_their_final_votes(client, conn):
     add_members(conn)
     add_vote(conn, 1, day=5, positions={"T000001": "Yea"})
-    add_vote(conn, 2, day=6, positions={"T000001": "Nay"}, question="On Motion to Recommit")
+    add_vote(
+        conn, 2, day=6, positions={"T000001": "Nay"}, question="On Motion to Recommit"
+    )
 
     response = client.get("/members/T000001/votes")
     body = response.json()
 
     assert response.status_code == 200
     assert body["member"] == {"bioguide_id": "T000001", "name": "Pat Example"}
-    assert [(v["roll_number"], v["position"], v["category"]) for v in body["votes"]] == [(1, "Yea", "legislation")]
+    assert [
+        (v["roll_number"], v["position"], v["category"]) for v in body["votes"]
+    ] == [(1, "Yea", "legislation")]
 
 
 def test_member_votes_gives_the_time_with_its_offset(client, conn):
@@ -122,13 +132,18 @@ def test_member_votes_gives_the_time_with_its_offset(client, conn):
 
     body = client.get("/members/T000001/votes").json()
 
-    assert body["votes"][0]["voted_at"] in ("2026-01-05T12:00:00Z", "2026-01-05T12:00:00+00:00")
+    assert body["votes"][0]["voted_at"] in (
+        "2026-01-05T12:00:00Z",
+        "2026-01-05T12:00:00+00:00",
+    )
 
 
 def test_show_all_adds_procedural_votes(client, conn):
     add_members(conn)
     add_vote(conn, 1, day=5, positions={"T000001": "Yea"})
-    add_vote(conn, 2, day=6, positions={"T000001": "Nay"}, question="On Motion to Recommit")
+    add_vote(
+        conn, 2, day=6, positions={"T000001": "Nay"}, question="On Motion to Recommit"
+    )
 
     body = client.get("/members/T000001/votes", params={"show": "all"}).json()
 
@@ -160,7 +175,15 @@ def test_unknown_member_is_404(client):
     assert response.status_code == 404
 
 
-@pytest.mark.parametrize("path", ["/members/not-an-id/votes", "/members/T000001/votes?limit=0", "/members/T000001/votes?limit=101", "/members/T000001/votes?show=some"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/members/not-an-id/votes",
+        "/members/T000001/votes?limit=0",
+        "/members/T000001/votes?limit=101",
+        "/members/T000001/votes?show=some",
+    ],
+)
 def test_malformed_requests_are_rejected(client, path):
     response = client.get(path)
 

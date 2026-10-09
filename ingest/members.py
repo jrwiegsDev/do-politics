@@ -65,7 +65,9 @@ def read_members() -> list[dict]:
         rows.extend(to_row(member, source) for member in fetch(source))
 
     if len(rows) < MIN_EXPECTED_MEMBERS:
-        raise ValueError(f"{PROJECT} has only {len(rows)} members; expected at least {MIN_EXPECTED_MEMBERS}")
+        raise ValueError(
+            f"{PROJECT} has only {len(rows)} members; expected at least {MIN_EXPECTED_MEMBERS}"
+        )
 
     return rows
 
@@ -87,7 +89,11 @@ def load(conn) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dry-run", action="store_true", help="download and print rows without touching the database")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="download and print rows without touching the database",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
