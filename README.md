@@ -353,6 +353,14 @@ ty is in beta, so its exact version is pinned in `uv.lock` and upgraded on purpo
 
 CI runs all three checks on every push and pull request, and fails if any of them finds something.
 
+The same three checks can run before every commit, through [pre-commit](https://pre-commit.com/). Set it up once per clone:
+
+```
+uv run pre-commit install
+```
+
+After that, `git commit` runs the checks first and stops if one fails, so a mistake is caught in about a second and not after a push. The hooks are listed in `.pre-commit-config.yaml`. Each one calls the tool through uv, so the hook, CI and the terminal all use the version pinned in `uv.lock`. `uv run pre-commit run --all-files` runs them without committing.
+
 ## Data sources
 
 | Source | Used for |
