@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 import psycopg
 import pytest
-from helpers import MEMBERS, add_members
+from helpers import add_members, last_run
 
 from ingest.votes import (
     EASTERN,
@@ -129,26 +129,6 @@ def fake_fetch(documents: dict[str, ET.Element]):
 def no_waiting(monkeypatch):
     """Skip the pause between requests, since nothing is really requested."""
     monkeypatch.setattr("ingest.votes.sleep", lambda seconds: None)
-
-
-@pytest.fixture
-def committing_conn(conn):
-    """A connection for testing load(), which commits as it goes.
-
-    The usual rollback cannot undo a commit, so this removes what the test
-    left behind, and the next test still starts from the same data.
-    """
-    yield conn
-    conn.rollback()
-    conn.execute("DELETE FROM votes")
-    conn.execute(
-        "DELETE FROM members WHERE bioguide_id = ANY(%s)",
-        [[member["bioguide_id"] for member in MEMBERS]],
-    )
-    conn.execute(
-        "DELETE FROM ingestion_runs WHERE job LIKE 'votes-%'"
-    )  # also matches votes-categories
-    conn.commit()
 
 
 def test_house_vote_becomes_a_row():
@@ -483,3 +463,40 @@ def test_load_stops_at_the_limit(committing_conn, monkeypatch, no_waiting):
     loaded = load(committing_conn, "house", 2, limit=1)
 
     assert loaded == 1
+
+
+def test_load_reads_senate_votes_from_the_session_list(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    documents = {senate_menu_url(2): ET.fromstring(SENATE_MENU_XML)}
+    documents |= {senate_url(2, number): senate(number) for number in (1, 2, 3)}
+    monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch(documents))
+
+    loaded = load(committing_conn, "senate", 2)
+
+    recorded = last_run(committing_conn)
+    assert loaded == 3
+    assert count(committing_conn, "vote_positions") == 6
+    assert (recorded["job"], recorded["status"]) == ("votes-senate", "succeeded")
+    assert recorded["rows_loaded"] == 3
+
+
+def test_load_reports_a_question_wording_with_no_rule(
+    committing_conn, monkeypatch, no_waiting, capsys
+):
+    add_members(committing_conn)
+    unfamiliar = ET.fromstring(
+        HOUSE_XML.replace("<rollcall-num>100<", "<rollcall-num>1<").replace(
+            "On Passage", "On Something New"
+        )
+    )
+    monkeypatch.setattr(
+        "ingest.votes.fetch_xml", fake_fetch({house_url(2, 1): unfamiliar})
+    )
+
+    load(committing_conn, "house", 2)
+
+    printed = capsys.readouterr().out
+    assert "new question wording" in printed
+    assert "On Something New" in printed

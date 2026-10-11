@@ -17,3 +17,6 @@ __pycache__/
 
 # Downloaded source data (shapefiles etc.)
 data/
+
+# Coverage data written by pytest --cov
+.coverage

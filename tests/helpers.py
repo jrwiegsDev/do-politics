@@ -104,3 +104,12 @@ def add_vote(
         for b, p in positions.items()
     ]
     save(conn, vote, rows)
+
+
+def last_run(conn) -> dict:
+    """Return the newest ingestion_runs row as a dict."""
+    columns = "job, source, status, rows_loaded, error, finished_at"
+    row = conn.execute(
+        f"SELECT {columns} FROM ingestion_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    return dict(zip(columns.split(", "), row, strict=True))

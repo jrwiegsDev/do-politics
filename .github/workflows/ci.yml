@@ -32,4 +32,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
       - name: Run tests
-        run: uv run --env-file .env pytest -v
+        run: uv run --env-file .env pytest -v --cov
