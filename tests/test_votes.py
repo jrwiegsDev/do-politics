@@ -20,6 +20,9 @@ from ingest.votes import (
     parse_house,
     parse_senate,
     recategorize,
+    required_attr,
+    required_child,
+    required_text,
     save,
     senate_menu_url,
     senate_url,
@@ -246,6 +249,60 @@ def test_senate_vote_with_no_document_has_no_issue():
     vote, _ = parse_senate(root, "https://example.test/vote7.xml", BIOGUIDE_BY_LIS)
 
     assert vote["issue"] is None
+
+
+def test_required_child_names_the_missing_element():
+    root = ET.fromstring("<vote><congress>119</congress></vote>")
+
+    assert required_child(root, "congress").text == "119"
+    with pytest.raises(ValueError, match="<vote> has no <session> element"):
+        required_child(root, "session")
+
+
+def test_required_text_refuses_an_empty_element():
+    root = ET.fromstring("<vote><congress>119</congress><session/></vote>")
+
+    assert required_text(root, "congress") == "119"
+    with pytest.raises(ValueError, match="<session> in <vote> is empty"):
+        required_text(root, "session")
+
+
+def test_required_attr_names_the_missing_attribute():
+    legislator = ET.fromstring('<legislator name-id="T000001">Example</legislator>')
+
+    assert required_attr(legislator, "name-id") == "T000001"
+    with pytest.raises(ValueError, match="<legislator> has no party attribute"):
+        required_attr(legislator, "party")
+
+
+@pytest.mark.parametrize(
+    ("removed", "message"),
+    [
+        ("<action-date>25-Mar-2026</action-date>", "no <action-date> element"),
+        ("<congress>119</congress>", "no <congress> element"),
+        ("<rollcall-num>100</rollcall-num>", "no <rollcall-num> element"),
+        (' name-id="T000001"', "no name-id attribute"),
+    ],
+)
+def test_house_vote_missing_a_required_part_is_refused(removed, message):
+    root = ET.fromstring(HOUSE_XML.replace(removed, ""))
+
+    with pytest.raises(ValueError, match=message):
+        parse_house(root, "https://example.test/roll100.xml")
+
+
+def test_house_vote_with_no_metadata_is_refused():
+    root = ET.fromstring("<rollcall-vote><vote-data/></rollcall-vote>")
+
+    with pytest.raises(ValueError, match="no <vote-metadata> element"):
+        parse_house(root, "https://example.test/roll100.xml")
+
+
+def test_senate_vote_missing_a_required_part_is_refused():
+    root = ET.fromstring(SENATE_XML.replace("<congress>119</congress>", ""))
+
+    with pytest.raises(ValueError, match="no <congress> element"):
+        parse_senate(root, "https://example.test/vote.xml", BIOGUIDE_BY_LIS)
 
 
 def test_both_parsers_return_the_same_columns():

@@ -17,6 +17,8 @@ jobs:
         run: uv run ruff check .
       - name: Check the formatting
         run: uv run ruff format --check .
+      - name: Check the types
+        run: uv run ty check
 
   test:
     runs-on: ubuntu-latest

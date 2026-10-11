@@ -127,17 +127,43 @@ def text_or_none(value: str | None) -> str | None:
     return value or None
 
 
+def required_child(parent: ET.Element, path: str) -> ET.Element:
+    """Return the element at path, or raise an error naming what is missing."""
+    found = parent.find(path)
+    if found is None:
+        raise ValueError(f"<{parent.tag}> has no <{path}> element")
+    return found
+
+
+def required_text(parent: ET.Element, path: str) -> str:
+    """Return the text of the element at path, which must exist and hold text."""
+    value = required_child(parent, path).text
+    if value is None:
+        raise ValueError(f"<{path}> in <{parent.tag}> is empty")
+    return value
+
+
+def required_attr(element: ET.Element, name: str) -> str:
+    """Return the named attribute, or raise an error naming what is missing."""
+    value = element.get(name)
+    if value is None:
+        raise ValueError(f"<{element.tag}> has no {name} attribute")
+    return value
+
+
 def parse_house(root: ET.Element, source_url: str) -> tuple[dict, list[dict]]:
     """Turn one House Clerk roll call into a votes row and its position rows."""
-    meta = root.find("vote-metadata")
-    day = datetime.strptime(meta.findtext("action-date"), "%d-%b-%Y")
-    clock = time.fromisoformat(meta.find("action-time").get("time-etz"))
+    meta = required_child(root, "vote-metadata")
+    day = datetime.strptime(required_text(meta, "action-date"), "%d-%b-%Y")
+    clock = time.fromisoformat(
+        required_attr(required_child(meta, "action-time"), "time-etz")
+    )
 
     vote = {
         "chamber": "house",
-        "congress": int(meta.findtext("congress")),
-        "session": int(meta.findtext("session")[0]),
-        "roll_number": int(meta.findtext("rollcall-num")),
+        "congress": int(required_text(meta, "congress")),
+        "session": int(required_text(meta, "session")[0]),
+        "roll_number": int(required_text(meta, "rollcall-num")),
         "voted_at": datetime.combine(day, clock, tzinfo=EASTERN),
         "question": text_or_none(meta.findtext("vote-question")),
         "vote_type": text_or_none(meta.findtext("vote-type")),
@@ -149,10 +175,11 @@ def parse_house(root: ET.Element, source_url: str) -> tuple[dict, list[dict]]:
 
     positions = []
     for recorded in root.iter("recorded-vote"):
-        legislator = recorded.find("legislator")
+        legislator = required_child(recorded, "legislator")
+        bioguide_id = required_attr(legislator, "name-id")
         positions.append(
             {
-                "bioguide_id": legislator.get("name-id"),
+                "bioguide_id": bioguide_id,
                 "position": recorded.findtext("vote"),
                 "party": legislator.get("party"),
                 "state": legislator.get("state"),
@@ -166,13 +193,13 @@ def parse_senate(
     root: ET.Element, source_url: str, bioguide_by_lis: dict[str, str]
 ) -> tuple[dict, list[dict]]:
     """Turn one Senate roll call into a votes row and its position rows."""
-    voted = " ".join(root.findtext("vote_date").split())
+    voted = " ".join(required_text(root, "vote_date").split())
 
     vote = {
         "chamber": "senate",
-        "congress": int(root.findtext("congress")),
-        "session": int(root.findtext("session")),
-        "roll_number": int(root.findtext("vote_number")),
+        "congress": int(required_text(root, "congress")),
+        "session": int(required_text(root, "session")),
+        "roll_number": int(required_text(root, "vote_number")),
         "voted_at": datetime.strptime(voted, "%B %d, %Y, %I:%M %p").replace(
             tzinfo=EASTERN
         ),
@@ -188,7 +215,7 @@ def parse_senate(
     for member in root.iter("member"):
         positions.append(
             {
-                "bioguide_id": bioguide_by_lis[member.findtext("lis_member_id")],
+                "bioguide_id": bioguide_by_lis[required_text(member, "lis_member_id")],
                 "position": member.findtext("vote_cast"),
                 "party": member.findtext("party"),
                 "state": member.findtext("state"),
@@ -222,7 +249,9 @@ def senate_votes(
 ) -> Iterator[tuple[dict, list[dict]]]:
     """Yield each Senate vote after the given number, oldest first, from the session's list."""
     menu = fetch_xml(senate_menu_url(session))
-    numbers = sorted(int(vote.findtext("vote_number")) for vote in menu.iter("vote"))
+    numbers = sorted(
+        int(required_text(vote, "vote_number")) for vote in menu.iter("vote")
+    )
 
     for number in numbers:
         if number > after:
