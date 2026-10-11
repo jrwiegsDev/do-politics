@@ -1,0 +1,29 @@
+# Checks that run before each commit. Set up once with:
+#     uv run pre-commit install
+#
+# Each hook calls the tool through uv, so the hook, CI and the terminal all
+# use the one version pinned in uv.lock. The tests are left to CI: they need
+# the database running.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (likely mistakes)
+        entry: uv run ruff check .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ruff-format
+        name: ruff format (layout)
+        entry: uv run ruff format --check .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ty
+        name: ty check (types)
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+        always_run: true
