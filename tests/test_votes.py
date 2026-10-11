@@ -5,7 +5,7 @@ downloads anything and none depends on a real member staying in office.
 """
 
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import psycopg
 import pytest
@@ -13,10 +13,12 @@ from helpers import add_members, last_run
 
 from ingest.votes import (
     EASTERN,
+    NotPublished,
     check_belongs,
     house_url,
     house_votes,
     load,
+    load_current,
     parse_house,
     parse_senate,
     recategorize,
@@ -298,7 +300,7 @@ def test_vote_from_another_session_is_refused():
     vote, _ = parse_house(house(), "https://example.test/roll100.xml")
 
     with pytest.raises(ValueError):
-        check_belongs(vote, "house", 1)
+        check_belongs(vote, "house", 119, 1)
 
 
 def test_saving_a_vote_twice_keeps_one_vote_and_one_position_per_member(conn):
@@ -356,10 +358,10 @@ def test_member_with_a_vote_cannot_be_deleted(conn):
 def test_house_votes_stop_at_the_first_missing_roll_call(monkeypatch, no_waiting):
     monkeypatch.setattr(
         "ingest.votes.fetch_xml",
-        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+        fake_fetch({house_url(119, 2, 1): house(1), house_url(119, 2, 2): house(2)}),
     )
 
-    found = [vote["roll_number"] for vote, _ in house_votes(2, after=0)]
+    found = [vote["roll_number"] for vote, _ in house_votes(119, 2, after=0)]
 
     assert found == [1, 2]
 
@@ -367,10 +369,10 @@ def test_house_votes_stop_at_the_first_missing_roll_call(monkeypatch, no_waiting
 def test_house_votes_start_after_the_last_one_loaded(monkeypatch, no_waiting):
     monkeypatch.setattr(
         "ingest.votes.fetch_xml",
-        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+        fake_fetch({house_url(119, 2, 1): house(1), house_url(119, 2, 2): house(2)}),
     )
 
-    found = [vote["roll_number"] for vote, _ in house_votes(2, after=1)]
+    found = [vote["roll_number"] for vote, _ in house_votes(119, 2, after=1)]
 
     assert found == [2]
 
@@ -378,13 +380,13 @@ def test_house_votes_start_after_the_last_one_loaded(monkeypatch, no_waiting):
 def test_senate_votes_come_oldest_first_and_skip_those_already_loaded(
     monkeypatch, no_waiting
 ):
-    documents = {senate_menu_url(2): ET.fromstring(SENATE_MENU_XML)}
-    documents |= {senate_url(2, number): senate(number) for number in (1, 2, 3)}
+    documents = {senate_menu_url(119, 2): ET.fromstring(SENATE_MENU_XML)}
+    documents |= {senate_url(119, 2, number): senate(number) for number in (1, 2, 3)}
     monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch(documents))
 
     found = [
         vote["roll_number"]
-        for vote, _ in senate_votes(2, after=1, bioguide_by_lis=BIOGUIDE_BY_LIS)
+        for vote, _ in senate_votes(119, 2, after=1, bioguide_by_lis=BIOGUIDE_BY_LIS)
     ]
 
     assert found == [2, 3]
@@ -396,11 +398,11 @@ def test_load_saves_new_votes_and_a_second_run_finds_none(
     add_members(committing_conn)
     monkeypatch.setattr(
         "ingest.votes.fetch_xml",
-        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+        fake_fetch({house_url(119, 2, 1): house(1), house_url(119, 2, 2): house(2)}),
     )
 
-    first = load(committing_conn, "house", 2)
-    second = load(committing_conn, "house", 2)
+    first = load(committing_conn, "house", 119, 2)
+    second = load(committing_conn, "house", 119, 2)
 
     assert (first, second) == (2, 0)
     assert count(committing_conn, "votes") == 2
@@ -457,10 +459,10 @@ def test_load_stops_at_the_limit(committing_conn, monkeypatch, no_waiting):
     add_members(committing_conn)
     monkeypatch.setattr(
         "ingest.votes.fetch_xml",
-        fake_fetch({house_url(2, 1): house(1), house_url(2, 2): house(2)}),
+        fake_fetch({house_url(119, 2, 1): house(1), house_url(119, 2, 2): house(2)}),
     )
 
-    loaded = load(committing_conn, "house", 2, limit=1)
+    loaded = load(committing_conn, "house", 119, 2, limit=1)
 
     assert loaded == 1
 
@@ -469,11 +471,11 @@ def test_load_reads_senate_votes_from_the_session_list(
     committing_conn, monkeypatch, no_waiting
 ):
     add_members(committing_conn)
-    documents = {senate_menu_url(2): ET.fromstring(SENATE_MENU_XML)}
-    documents |= {senate_url(2, number): senate(number) for number in (1, 2, 3)}
+    documents = {senate_menu_url(119, 2): ET.fromstring(SENATE_MENU_XML)}
+    documents |= {senate_url(119, 2, number): senate(number) for number in (1, 2, 3)}
     monkeypatch.setattr("ingest.votes.fetch_xml", fake_fetch(documents))
 
-    loaded = load(committing_conn, "senate", 2)
+    loaded = load(committing_conn, "senate", 119, 2)
 
     recorded = last_run(committing_conn)
     assert loaded == 3
@@ -492,11 +494,67 @@ def test_load_reports_a_question_wording_with_no_rule(
         )
     )
     monkeypatch.setattr(
-        "ingest.votes.fetch_xml", fake_fetch({house_url(2, 1): unfamiliar})
+        "ingest.votes.fetch_xml", fake_fetch({house_url(119, 2, 1): unfamiliar})
     )
 
-    load(committing_conn, "house", 2)
+    load(committing_conn, "house", 119, 2)
 
     printed = capsys.readouterr().out
     assert "new question wording" in printed
     assert "On Something New" in printed
+
+
+def test_addresses_follow_the_congress_and_session():
+    assert house_url(119, 2, 7) == "https://clerk.house.gov/evs/2026/roll007.xml"
+    assert house_url(120, 1, 7) == "https://clerk.house.gov/evs/2027/roll007.xml"
+    assert senate_url(120, 1, 7).endswith("/vote1201/vote_120_1_00007.xml")
+    assert senate_menu_url(120, 1).endswith("/vote_menu_120_1.xml")
+
+
+def test_senate_session_with_no_list_yet_has_no_votes(monkeypatch, no_waiting):
+    def not_published(url):
+        raise NotPublished(url)
+
+    monkeypatch.setattr("ingest.votes.fetch_xml", not_published)
+
+    assert list(senate_votes(120, 1, after=0, bioguide_by_lis=BIOGUIDE_BY_LIS)) == []
+
+
+def test_senate_vote_on_the_list_that_cannot_be_fetched_fails(monkeypatch, no_waiting):
+    def only_the_list(url):
+        if url == senate_menu_url(119, 2):
+            return ET.fromstring(SENATE_MENU_XML)
+        raise NotPublished(url)
+
+    monkeypatch.setattr("ingest.votes.fetch_xml", only_the_list)
+
+    with pytest.raises(NotPublished):
+        list(senate_votes(119, 2, after=0, bioguide_by_lis=BIOGUIDE_BY_LIS))
+
+
+def test_load_current_checks_the_earlier_session_too(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    first_of_the_120th = ET.fromstring(
+        HOUSE_XML.replace("<congress>119<", "<congress>120<")
+        .replace("<session>2nd<", "<session>1st<")
+        .replace("<rollcall-num>100<", "<rollcall-num>1<")
+    )
+    monkeypatch.setattr(
+        "ingest.votes.fetch_xml",
+        fake_fetch(
+            {
+                house_url(119, 2, 1): house(1),
+                house_url(120, 1, 1): first_of_the_120th,
+            }
+        ),
+    )
+
+    loaded = load_current(committing_conn, "house", date(2027, 1, 5))
+
+    stored = committing_conn.execute(
+        "SELECT congress, session FROM votes ORDER BY congress"
+    ).fetchall()
+    assert loaded == 2
+    assert stored == [(119, 2), (120, 1)]

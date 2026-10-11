@@ -98,12 +98,14 @@ Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or an
    uv run --env-file .env python -m ingest.members
    ```
 
-8. Load the roll call votes, one chamber and session at a time. This is one download per vote with a short pause between them, so a full session takes several minutes. Add `--limit 3` to try it on a few votes first.
+8. Load the roll call votes, one chamber at a time. This is one download per vote with a short pause between them, so a full session takes several minutes. Add `--limit 3` to try it on a few votes first.
 
    ```
-   uv run --env-file .env python -m ingest.votes --chamber house --session 2
-   uv run --env-file .env python -m ingest.votes --chamber senate --session 2
+   uv run --env-file .env python -m ingest.votes --chamber house
+   uv run --env-file .env python -m ingest.votes --chamber senate
    ```
+
+   With no session named, the loader works out the current one from today's date. To load an earlier session, name it with `--congress 119 --session 1`.
 
 9. Start the API. `--reload` restarts it when a file changes.
 
@@ -217,9 +219,11 @@ Two tables (`migrations/versions/0005_votes.py`) hold the roll calls. `votes` ha
 `ingest/votes.py` loads them from the chambers' own records, the [House Clerk](https://clerk.house.gov/) and [Senate.gov](https://www.senate.gov/), which publish one XML file per roll call:
 
 ```
-uv run --env-file .env python -m ingest.votes --chamber house --session 2
-uv run --env-file .env python -m ingest.votes --chamber senate --session 1
+uv run --env-file .env python -m ingest.votes --chamber house
+uv run --env-file .env python -m ingest.votes --chamber senate --congress 119 --session 1
 ```
+
+The Congress and session are not written into the loader. `ingest/congress.py` works them out from the date: a Congress lasts two years and is seated on January 3 of an odd year, so January 1 and 2 still belong to the year before. Run without `--congress` and `--session`, the loader takes today's date, loads the session in progress, and also checks the one before it, because a vote cast in a session's last days can be published after the next has begun. When a new Congress is seated the loader moves to it without a code change.
 
 Every roll call is loaded, including quorum calls and procedural votes, and each position is stored exactly as the chamber spells it. That is `Yea` and `Nay` on some votes, `Aye` and `No` on others, `Present`, `Not Voting`, and in the election of the Speaker a candidate's name.
 

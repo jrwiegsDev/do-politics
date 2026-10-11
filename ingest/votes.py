@@ -3,9 +3,12 @@
 Run ingest.members first: every position must belong to a known member.
 
 Usage:
-    uv run --env-file .env python -m ingest.votes --chamber house --session 2
-    uv run --env-file .env python -m ingest.votes --chamber senate --session 2
-    uv run --env-file .env python -m ingest.votes --chamber house --session 2 --limit 3
+    uv run --env-file .env python -m ingest.votes --chamber house
+    uv run --env-file .env python -m ingest.votes --chamber senate --congress 119 --session 1
+    uv run --env-file .env python -m ingest.votes --chamber house --limit 3
+
+With no --congress and --session, the current session is worked out from
+today's date, and the session before it is checked as well.
     uv run --env-file .env python -m ingest.votes --recategorize
 """
 
@@ -13,7 +16,7 @@ import argparse
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
-from datetime import datetime, time
+from datetime import date, datetime, time
 from itertools import islice
 from time import sleep
 from zoneinfo import ZoneInfo
@@ -21,15 +24,9 @@ from zoneinfo import ZoneInfo
 from psycopg.rows import dict_row
 
 from ingest.categories import categorize, is_known
+from ingest.congress import session_year, sessions_to_check
 from ingest.db import connect
 from ingest.runs import record_run
-
-CONGRESS = 119
-
-# A session is filed under the year it starts in. A vote cast in the first
-# days of the following January, before the next Congress convenes, still
-# belongs to it and is numbered and filed with the rest of that session.
-SESSION_YEARS = {1: 2025, 2: 2026}
 
 # Both chambers publish vote times as Eastern time.
 EASTERN = ZoneInfo("America/New_York")
@@ -101,23 +98,38 @@ WHERE id = %(id)s;
 """
 
 
-def house_url(session: int, number: int) -> str:
-    return f"https://clerk.house.gov/evs/{SESSION_YEARS[session]}/roll{number:03d}.xml"
+class NotPublished(Exception):
+    """The address asked for does not exist on the chamber's site."""
 
 
-def senate_url(session: int, number: int) -> str:
-    folder = f"vote{CONGRESS}{session}"
-    return f"https://www.senate.gov/legislative/LIS/roll_call_votes/{folder}/vote_{CONGRESS}_{session}_{number:05d}.xml"
+def house_url(congress: int, session: int, number: int) -> str:
+    # A session is filed under the year it starts in. A vote cast in the first
+    # days of the following January, before the next Congress convenes, still
+    # belongs to it and is numbered and filed with the rest of that session.
+    year = session_year(congress, session)
+    return f"https://clerk.house.gov/evs/{year}/roll{number:03d}.xml"
 
 
-def senate_menu_url(session: int) -> str:
-    return f"https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_{CONGRESS}_{session}.xml"
+def senate_url(congress: int, session: int, number: int) -> str:
+    folder = f"vote{congress}{session}"
+    return f"https://www.senate.gov/legislative/LIS/roll_call_votes/{folder}/vote_{congress}_{session}_{number:05d}.xml"
+
+
+def senate_menu_url(congress: int, session: int) -> str:
+    return f"https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_{congress}_{session}.xml"
 
 
 def fetch_xml(url: str) -> ET.Element:
-    """Download one XML document and return its root element."""
+    """Download one XML document and return its root element.
+
+    The Senate answers an address that does not exist by redirecting to a
+    "file not found" web page with a normal success status, so ending up
+    anywhere but the address asked for is what marks a miss.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=30) as response:
+        if response.url != url:
+            raise NotPublished(url)
         return ET.fromstring(response.read())
 
 
@@ -225,7 +237,9 @@ def parse_senate(
     return vote, positions
 
 
-def house_votes(session: int, after: int) -> Iterator[tuple[dict, list[dict]]]:
+def house_votes(
+    congress: int, session: int, after: int
+) -> Iterator[tuple[dict, list[dict]]]:
     """Yield each House roll call after the given number, stopping at the first one missing.
 
     The Clerk answers HTTP 200 with a small error document for a roll call
@@ -234,7 +248,7 @@ def house_votes(session: int, after: int) -> Iterator[tuple[dict, list[dict]]]:
     """
     number = after + 1
     while True:
-        url = house_url(session, number)
+        url = house_url(congress, session, number)
         root = fetch_xml(url)
         if root.tag != "rollcall-vote":
             return
@@ -245,24 +259,33 @@ def house_votes(session: int, after: int) -> Iterator[tuple[dict, list[dict]]]:
 
 
 def senate_votes(
-    session: int, after: int, bioguide_by_lis: dict[str, str]
+    congress: int, session: int, after: int, bioguide_by_lis: dict[str, str]
 ) -> Iterator[tuple[dict, list[dict]]]:
-    """Yield each Senate vote after the given number, oldest first, from the session's list."""
-    menu = fetch_xml(senate_menu_url(session))
+    """Yield each Senate vote after the given number, oldest first, from the session's list.
+
+    A session that has not held a vote yet has no list, which is not an error:
+    there is simply nothing to load. A vote that is on the list but cannot be
+    fetched is an error, and fails the run.
+    """
+    try:
+        menu = fetch_xml(senate_menu_url(congress, session))
+    except NotPublished:
+        return
+
     numbers = sorted(
         int(required_text(vote, "vote_number")) for vote in menu.iter("vote")
     )
 
     for number in numbers:
         if number > after:
-            url = senate_url(session, number)
+            url = senate_url(congress, session, number)
             yield parse_senate(fetch_xml(url), url, bioguide_by_lis)
             sleep(PAUSE_SECONDS)
 
 
-def check_belongs(vote: dict, chamber: str, session: int) -> None:
+def check_belongs(vote: dict, chamber: str, congress: int, session: int) -> None:
     """Refuse a vote whose own labels disagree with the session that was asked for."""
-    asked = (chamber, CONGRESS, session)
+    asked = (chamber, congress, session)
     found = (vote["chamber"], vote["congress"], vote["session"])
     if found != asked:
         raise ValueError(f"{vote['source_url']} says it is {found}; expected {asked}")
@@ -280,26 +303,27 @@ def save(conn, vote: dict, positions: list[dict]) -> None:
         )
 
 
-def load(conn, chamber: str, session: int, limit: int | None = None) -> int:
-    """Load every vote newer than the last one stored, and return how many were loaded.
+def load(
+    conn, chamber: str, congress: int, session: int, limit: int | None = None
+) -> int:
+    """Load one session's votes newer than the last one stored, and return how many.
 
     Each vote is committed with its positions as soon as it is saved. A run
     that fails partway is recorded as failed and keeps the votes already
     saved, so the next run carries on from where this one stopped.
     """
     with record_run(conn, f"votes-{chamber}", SOURCES[chamber]) as run:
-        identity = {"chamber": chamber, "congress": CONGRESS, "session": session}
+        identity = {"chamber": chamber, "congress": congress, "session": session}
         after = conn.execute(LAST_LOADED_SQL, identity).fetchone()[0]
 
         if chamber == "house":
-            found = house_votes(session, after)
+            found = house_votes(congress, session, after)
         else:
-            found = senate_votes(
-                session, after, dict(conn.execute(BIOGUIDE_BY_LIS_SQL).fetchall())
-            )
+            bioguide_by_lis = dict(conn.execute(BIOGUIDE_BY_LIS_SQL).fetchall())
+            found = senate_votes(congress, session, after, bioguide_by_lis)
 
         for vote, positions in islice(found, limit):
-            check_belongs(vote, chamber, session)
+            check_belongs(vote, chamber, congress, session)
             save(conn, vote, positions)
             conn.commit()
             run.rows_loaded += 1
@@ -310,6 +334,18 @@ def load(conn, chamber: str, session: int, limit: int | None = None) -> int:
                 )
 
     return run.rows_loaded
+
+
+def load_current(conn, chamber: str, today: date, limit: int | None = None) -> int:
+    """Load new votes from the session in progress and the one before it.
+
+    The earlier session is checked because a vote cast in its last days can
+    be published after the next session has begun.
+    """
+    return sum(
+        load(conn, chamber, congress, session, limit)
+        for congress, session in sessions_to_check(today)
+    )
 
 
 def recategorize(conn) -> tuple[int, list[dict]]:
@@ -336,7 +372,8 @@ def recategorize(conn) -> tuple[int, list[dict]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--chamber", choices=sorted(SOURCES))
-    parser.add_argument("--session", type=int, choices=sorted(SESSION_YEARS))
+    parser.add_argument("--congress", type=int, help="such as 119; needs --session")
+    parser.add_argument("--session", type=int, choices=[1, 2], help="needs --congress")
     parser.add_argument("--limit", type=int, help="stop after this many votes")
     parser.add_argument(
         "--recategorize",
@@ -355,14 +392,21 @@ def main() -> None:
             )
         return
 
-    if args.chamber is None or args.session is None:
-        parser.error(
-            "--chamber and --session are required unless --recategorize is given"
-        )
+    if args.chamber is None:
+        parser.error("--chamber is required unless --recategorize is given")
+    if (args.congress is None) != (args.session is None):
+        parser.error("give both --congress and --session, or neither")
 
     with connect() as conn:
-        loaded = load(conn, args.chamber, args.session, args.limit)
-    print(f"{loaded} {args.chamber} votes loaded from {SOURCES[args.chamber]}")
+        if args.congress is None:
+            checked = "the current session and the one before it"
+            loaded = load_current(conn, args.chamber, date.today(), args.limit)
+        else:
+            checked = f"Congress {args.congress}, session {args.session}"
+            loaded = load(conn, args.chamber, args.congress, args.session, args.limit)
+    print(
+        f"{loaded} {args.chamber} votes loaded from {SOURCES[args.chamber]} ({checked})"
+    )
 
 
 if __name__ == "__main__":
