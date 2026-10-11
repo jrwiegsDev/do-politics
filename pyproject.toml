@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.17.0",
     "ty>=0.0.86",
 ]
@@ -26,3 +27,15 @@ extend-exclude = ["migrations/versions"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.coverage.run]
+# Measured only when pytest is given --cov, as CI does.
+source = ["app", "ingest"]
+# Also check that both sides of each `if` were tried.
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+# CI fails below this. It sits just under the measured figure so coverage
+# cannot slide unnoticed; it is a floor, not a target.
+fail_under = 76

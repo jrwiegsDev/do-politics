@@ -3,11 +3,13 @@
 from datetime import date
 
 import pytest
+from helpers import last_run
 
 from ingest.officials import (
     DELETE_DEPARTED_SQL,
     UPSERT_SQL,
     district_code_for,
+    load,
     read_officials,
     to_row,
 )
@@ -139,3 +141,39 @@ def test_a_file_with_too_few_members_is_refused(monkeypatch):
 
     with pytest.raises(ValueError):
         read_officials()
+
+
+def test_load_adds_the_members_removes_the_departed_and_records_the_run(
+    committing_conn, monkeypatch
+):
+    departed = to_row(HOUSE_MEMBER | {"id": {"bioguide": "T000009"}})
+    committing_conn.execute(UPSERT_SQL, departed)
+    monkeypatch.setattr("ingest.officials.MIN_EXPECTED_MEMBERS", 1)
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER, SENATOR])
+
+    loaded, removed = load(committing_conn)
+
+    in_office = committing_conn.execute(
+        "SELECT bioguide_id FROM officials ORDER BY bioguide_id"
+    ).fetchall()
+    recorded = last_run(committing_conn)
+    assert (loaded, removed) == (2, 1)
+    assert in_office == [("T000001",), ("T000002",)]
+    assert (recorded["job"], recorded["status"]) == ("officials", "succeeded")
+    assert recorded["rows_loaded"] == 2
+
+
+def test_load_of_a_short_file_fails_the_run_and_removes_nobody(
+    committing_conn, monkeypatch
+):
+    committing_conn.execute(UPSERT_SQL, to_row(SENATOR))
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER])
+
+    with pytest.raises(ValueError):
+        load(committing_conn)
+
+    in_office = committing_conn.execute("SELECT bioguide_id FROM officials").fetchall()
+    recorded = last_run(committing_conn)
+    assert in_office == [("T000002",)]
+    assert (recorded["job"], recorded["status"]) == ("officials", "failed")
+    assert recorded["error"].startswith("ValueError: legislators-current has only 1")

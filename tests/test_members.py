@@ -2,8 +2,9 @@
 
 import psycopg
 import pytest
+from helpers import last_run
 
-from ingest.members import UPSERT_SQL, read_members, to_row
+from ingest.members import UPSERT_SQL, load, read_members, to_row
 
 SENATOR = {
     "id": {"bioguide": "T000003", "lis": "S900"},
@@ -106,3 +107,24 @@ def test_too_few_members_is_refused(monkeypatch):
 
     with pytest.raises(ValueError):
         read_members()
+
+
+def test_load_adds_people_from_both_files_and_records_the_run(
+    committing_conn, monkeypatch
+):
+    monkeypatch.setattr("ingest.members.MIN_EXPECTED_MEMBERS", 1)
+    monkeypatch.setattr("ingest.members.fetch", lambda source: FILES[source])
+
+    loaded = load(committing_conn)
+
+    stored = committing_conn.execute(
+        "SELECT bioguide_id, source FROM members ORDER BY bioguide_id"
+    ).fetchall()
+    recorded = last_run(committing_conn)
+    assert loaded == 2
+    assert [source for _, source in stored] == [
+        "legislators-current",
+        "legislators-historical",
+    ]
+    assert (recorded["job"], recorded["status"]) == ("members", "succeeded")
+    assert recorded["rows_loaded"] == 2

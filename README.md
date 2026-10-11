@@ -332,6 +332,14 @@ The tests need the database container running. They never touch the development 
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 
+To see which lines no test runs, add `--cov`:
+
+```
+uv run --env-file .env pytest --cov
+```
+
+This uses [pytest-cov](https://pytest-cov.readthedocs.io/) and prints, for each file in `app/` and `ingest/`, the share of lines the tests ran and the line numbers they missed. CI runs it this way and fails if the total drops below the floor set in `pyproject.toml`. The floor sits just under the measured figure, so coverage cannot slide unnoticed; it is not a target. What is left untested on purpose is the downloading itself and each loader's command-line entry point.
+
 ## Code checks
 
 [Ruff](https://docs.astral.sh/ruff/) checks the code without running it. As a linter it flags likely mistakes, such as a function defined twice or an import that is never used. As a formatter it keeps the layout consistent, so a diff shows what changed and not how someone wrapped a line.
