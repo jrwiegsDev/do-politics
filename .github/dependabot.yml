@@ -1,0 +1,45 @@
+# Dependabot opens a pull request when something this project depends on has
+# a newer version. CI runs on each one, so an update is read and merged like
+# any other change.
+#
+# The cooldown waits until a release is a week old. A bad or compromised
+# release is usually caught and withdrawn within days, so this keeps the
+# project from being among the first to install it. Security fixes are not
+# delayed by it.
+version: 2
+updates:
+  # Python libraries, from pyproject.toml and uv.lock.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      # One pull request for the week's small updates. A major version,
+      # which may break things, still gets a pull request of its own.
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore"
+
+  # The actions used in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore"
+
+  # The Postgres base image in db/Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/db"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore"

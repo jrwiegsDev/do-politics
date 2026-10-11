@@ -361,6 +361,10 @@ uv run pre-commit install
 
 After that, `git commit` runs the checks first and stops if one fails, so a mistake is caught in about a second and not after a push. The hooks are listed in `.pre-commit-config.yaml`. Each one calls the tool through uv, so the hook, CI and the terminal all use the version pinned in `uv.lock`. `uv run pre-commit run --all-files` runs them without committing.
 
+## Dependency updates
+
+[Dependabot](https://docs.github.com/en/code-security/dependabot) checks once a week for newer versions of the Python libraries, the GitHub Actions used in CI, and the Postgres base image, and opens a pull request for each update (`.github/dependabot.yml`). CI runs on those pull requests like any other. A release has to be a week old before it is proposed, so the project is never among the first to install a bad one.
+
 ## Data sources
 
 | Source | Used for |
