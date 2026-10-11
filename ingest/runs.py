@@ -44,10 +44,13 @@ def record_run(conn: psycopg.Connection, job: str, source: str):
     on record. The job's own writes and the 'succeeded' mark commit together.
     On any error the job's writes are rolled back and the run is marked 'failed'.
     """
-    run_id = conn.execute(START_RUN_SQL, {"job": job, "source": source}).fetchone()[0]
+    row = conn.execute(START_RUN_SQL, {"job": job, "source": source}).fetchone()
+    # INSERT ... RETURNING always hands back the new row. The type checker
+    # cannot know that, so this states it.
+    assert row is not None
     conn.commit()
 
-    run = Run(run_id)
+    run = Run(row[0])
     try:
         yield run
         conn.execute(

@@ -341,7 +341,17 @@ uv run ruff check .
 uv run ruff format .
 ```
 
-`ruff check --fix .` applies the fixes it can make by itself. CI runs both checks on every push and pull request, and fails if either finds something. Migrations that have been pushed are excluded, since they are never edited.
+`ruff check --fix .` applies the fixes it can make by itself. Migrations that have been pushed are excluded, since they are never edited.
+
+[ty](https://docs.astral.sh/ty/) is a type checker. It also reads the code without running it, and follows each value from where it is made to where it is used. Its commonest finding is a value that might be `None` being used as if it never were, such as an XML element a parser expects that a source file might not contain.
+
+```
+uv run ty check
+```
+
+ty is in beta, so its exact version is pinned in `uv.lock` and upgraded on purpose.
+
+CI runs all three checks on every push and pull request, and fails if any of them finds something.
 
 ## Data sources
 

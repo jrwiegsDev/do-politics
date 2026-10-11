@@ -132,9 +132,16 @@ def effective_from_for(state: str) -> date:
 
 def read_districts(shp_path: Path, congress: int, effective_from: date):
     """Yield one dict per district, with keys matching the districts table columns."""
-    with shapefile.Reader(str(shp_path)) as reader:
+    # Named before the `with`, because pyshp's type hints lose the Reader type
+    # when it is written as `with ... as reader`.
+    reader = shapefile.Reader(str(shp_path))
+    with reader:
         for item in reader.iterShapeRecords():
-            record = item.record.as_dict()
+            fields, shape = item.record, item.shape
+            if fields is None or shape is None:
+                raise ValueError(f"{shp_path.name} has a row with no record or shape")
+
+            record = fields.as_dict()
             code = record[f"CD{congress}FP"]
             if code == NOT_A_DISTRICT:
                 continue
@@ -148,7 +155,7 @@ def read_districts(shp_path: Path, congress: int, effective_from: date):
                 "name": record["NAMELSAD"],
                 "effective_from": effective_from,
                 "source": shp_path.stem,
-                "boundary": json.dumps(item.shape.__geo_interface__),
+                "boundary": json.dumps(shape.__geo_interface__),
             }
 
 
