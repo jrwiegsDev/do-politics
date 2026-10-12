@@ -38,4 +38,4 @@ branch = true
 show_missing = true
 # CI fails below this. It sits just under the measured figure so coverage
 # cannot slide unnoticed; it is a floor, not a target.
-fail_under = 76
+fail_under = 80
