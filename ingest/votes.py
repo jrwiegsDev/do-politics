@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 from psycopg.rows import dict_row
 
+from ingest.bills import bill_for
 from ingest.categories import categorize, is_known
 from ingest.congress import session_year, sessions_to_check
 from ingest.db import connect
@@ -54,11 +55,13 @@ WHERE lis_id IS NOT NULL;
 UPSERT_VOTE_SQL = """
 INSERT INTO votes (
     chamber, congress, session, roll_number, voted_at,
-    question, vote_type, issue, title, result, source_url, category
+    question, vote_type, issue, title, result, source_url,
+    category, bill_type, bill_number
 )
 VALUES (
     %(chamber)s, %(congress)s, %(session)s, %(roll_number)s, %(voted_at)s,
-    %(question)s, %(vote_type)s, %(issue)s, %(title)s, %(result)s, %(source_url)s, %(category)s
+    %(question)s, %(vote_type)s, %(issue)s, %(title)s, %(result)s, %(source_url)s,
+    %(category)s, %(bill_type)s, %(bill_number)s
 )
 ON CONFLICT (chamber, congress, session, roll_number)
 DO UPDATE SET
@@ -70,6 +73,8 @@ DO UPDATE SET
     result = EXCLUDED.result,
     source_url = EXCLUDED.source_url,
     category = EXCLUDED.category,
+    bill_type = EXCLUDED.bill_type,
+    bill_number = EXCLUDED.bill_number,
     updated_at = now()
 RETURNING id;
 """
@@ -85,14 +90,17 @@ DO UPDATE SET
 """
 
 STORED_VOTES_SQL = """
-SELECT id, chamber, question, title, category, source_url
+SELECT id, chamber, question, issue, title, source_url,
+       category, bill_type, bill_number
 FROM votes
 ORDER BY id;
 """
 
-SET_CATEGORY_SQL = """
+SET_LABELS_SQL = """
 UPDATE votes
 SET category = %(category)s,
+    bill_type = %(bill_type)s,
+    bill_number = %(bill_number)s,
     updated_at = now()
 WHERE id = %(id)s;
 """
@@ -291,11 +299,24 @@ def check_belongs(vote: dict, chamber: str, congress: int, session: int) -> None
         raise ValueError(f"{vote['source_url']} says it is {found}; expected {asked}")
 
 
+def labels(vote: dict) -> dict:
+    """Work out the columns the loader derives from a vote's own text.
+
+    These are the vote's category and the bill it concerns. A vote that
+    names no bill, such as a nomination or a quorum call, has neither a
+    bill type nor a bill number.
+    """
+    bill_type, bill_number = bill_for(vote["issue"]) or (None, None)
+    return {
+        "category": categorize(vote),
+        "bill_type": bill_type,
+        "bill_number": bill_number,
+    }
+
+
 def save(conn, vote: dict, positions: list[dict]) -> None:
-    """Upsert one vote with its category, then its positions under the id the database gave it."""
-    vote_id = conn.execute(
-        UPSERT_VOTE_SQL, vote | {"category": categorize(vote)}
-    ).fetchone()[0]
+    """Upsert one vote with its labels, then its positions under the id the database gave it."""
+    vote_id = conn.execute(UPSERT_VOTE_SQL, vote | labels(vote)).fetchone()[0]
     with conn.cursor() as cur:
         cur.executemany(
             UPSERT_POSITION_SQL,
@@ -349,21 +370,23 @@ def load_current(conn, chamber: str, today: date, limit: int | None = None) -> i
 
 
 def recategorize(conn) -> tuple[int, list[dict]]:
-    """Apply the current category rules to every stored vote, as one recorded run.
+    """Apply the current category and bill rules to every stored vote, as one recorded run.
 
-    Nothing is downloaded: the question and title are already stored. Returns
-    how many votes changed category, and the votes whose question has no rule.
+    Nothing is downloaded: the question, issue and title are already stored.
+    Returns how many votes changed category or bill, and the votes whose
+    question has no rule.
     """
     with record_run(conn, "votes-categories", "ingest.categories") as run:
         with conn.cursor(row_factory=dict_row) as cur:
             votes = cur.execute(STORED_VOTES_SQL).fetchall()
 
-        changed = [vote for vote in votes if categorize(vote) != vote["category"]]
+        changed = [
+            {"id": vote["id"]} | labels(vote)
+            for vote in votes
+            if any(vote[column] != value for column, value in labels(vote).items())
+        ]
         with conn.cursor() as cur:
-            cur.executemany(
-                SET_CATEGORY_SQL,
-                [{"id": vote["id"], "category": categorize(vote)} for vote in changed],
-            )
+            cur.executemany(SET_LABELS_SQL, changed)
         run.rows_loaded = len(changed)
 
     return len(changed), [vote for vote in votes if not is_known(vote)]
@@ -378,14 +401,14 @@ def main() -> None:
     parser.add_argument(
         "--recategorize",
         action="store_true",
-        help="re-apply the category rules to stored votes; downloads nothing",
+        help="re-apply the category and bill rules to stored votes; downloads nothing",
     )
     args = parser.parse_args()
 
     if args.recategorize:
         with connect() as conn:
             changed, unknown = recategorize(conn)
-        print(f"{changed} votes changed category")
+        print(f"{changed} votes changed category or bill")
         for vote in unknown:
             print(
                 f"  no rule for {vote['chamber']} question {vote['question']!r}: {vote['source_url']}"
