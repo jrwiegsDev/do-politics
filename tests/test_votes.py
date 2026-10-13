@@ -417,6 +417,52 @@ def test_saved_vote_carries_its_category(conn):
     assert conn.execute("SELECT category FROM votes").fetchone()[0] == "legislation"
 
 
+def test_saved_vote_carries_its_bill(conn):
+    add_members(conn)
+    vote, positions = parse_house(house(), "https://example.test/roll100.xml")
+
+    save(conn, vote, positions)
+
+    bill = conn.execute("SELECT bill_type, bill_number FROM votes").fetchone()
+    assert bill == ("hr", 9999)
+
+
+def test_saved_nomination_names_no_bill(conn):
+    add_members(conn)
+    vote, positions = parse_senate(
+        senate(), "https://example.test/vote7.xml", BIOGUIDE_BY_LIS
+    )
+
+    save(conn, vote, positions)
+
+    bill = conn.execute("SELECT bill_type, bill_number FROM votes").fetchone()
+    assert bill == (None, None)
+
+
+def test_bill_type_without_a_number_is_refused(conn):
+    add_members(conn)
+    vote, positions = parse_house(house(), "https://example.test/roll100.xml")
+    save(conn, vote, positions)
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("UPDATE votes SET bill_number = NULL")
+
+
+def test_recategorize_fills_in_a_missing_bill(committing_conn):
+    add_members(committing_conn)
+    vote, positions = parse_house(house(), "https://example.test/roll100.xml")
+    save(committing_conn, vote, positions)
+    committing_conn.execute("UPDATE votes SET bill_type = NULL, bill_number = NULL")
+
+    changed, _ = recategorize(committing_conn)
+
+    bill = committing_conn.execute(
+        "SELECT bill_type, bill_number FROM votes"
+    ).fetchone()
+    assert changed == 1
+    assert bill == ("hr", 9999)
+
+
 def test_category_outside_the_three_is_refused(conn):
     add_members(conn)
     vote, positions = parse_house(house(), "https://example.test/roll100.xml")

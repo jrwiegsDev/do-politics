@@ -131,7 +131,7 @@ uv run --env-file .env alembic upgrade head
 
 Each migration runs in a transaction, so a failure leaves the schema unchanged. Alembic connects through the same `ingest/db.py` function as the ingestion jobs, so no database URL or password is kept in `alembic.ini`.
 
-To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0007`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
+To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0008`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
 
 The only SQL outside the migrations is `db/init/001_extensions.sql`, which enables PostGIS when the local container is first created so its health check can pass.
 
@@ -235,11 +235,15 @@ Neither chamber says which votes are final and which are steps along the way, so
 | `nomination` | Senate confirmations |
 | `procedural` | Everything else: amendments, cloture, motions to proceed, recommit or table, quorum calls |
 
-The rule is `categorize` in `ingest/categories.py`. It reads the vote's question, and for two questions that cover both kinds of vote it reads the title too: a House resolution is `legislation` unless it is a rule setting the terms for debating a bill, and the Senate's catch-all "On the Motion" is `legislation` only for a motion to accept the House's version. A question wording the rule has never seen counts as `procedural`, so nothing is shown as a final vote by mistake, and the loader reports it. When the rule changes, this re-labels the stored votes without downloading anything:
+The rule is `categorize` in `ingest/categories.py`. It reads the vote's question, and for two questions that cover both kinds of vote it reads the title too: a House resolution is `legislation` unless it is a rule setting the terms for debating a bill, and the Senate's catch-all "On the Motion" is `legislation` only for a motion to accept the House's version. A question wording the rule has never seen counts as `procedural`, so nothing is shown as a final vote by mistake, and the loader reports it. When a rule changes, this re-labels the stored votes without downloading anything:
 
 ```
 uv run --env-file .env python -m ingest.votes --recategorize
 ```
+
+The loader also records which bill a vote concerns, in two columns added by `migrations/versions/0007_bills.py`. The House writes a bill as `H R 5103` and the Senate as `H.R. 5103`; `bill_for` in `ingest/bills.py` turns both into the type and number Congress.gov files the bill under, `hr` and `5103`. A vote that names no bill, such as a nomination or a quorum call, leaves both columns empty, and a check constraint keeps them filled or empty together. The same `--recategorize` command fills these columns for stored votes.
+
+The same migration creates the `bills` and `bill_summaries` tables, which will hold each bill's official title and its Congressional Research Service summaries from the [Congress.gov API](https://api.congress.gov/). Nothing loads them yet.
 
 The two chambers publish different formats, so each has its own parser, and both produce the same rows. The differences they absorb:
 
