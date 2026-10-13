@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime
 
+from ingest.bills import save as save_bill
 from ingest.members import UPSERT_SQL as UPSERT_MEMBER_SQL
 from ingest.officials import UPSERT_SQL
 from ingest.votes import save
@@ -104,6 +105,39 @@ def add_vote(
         for b, p in positions.items()
     ]
     save(conn, vote, rows)
+
+
+def summary(version_code, action_on, action_desc, text) -> dict:
+    """Build a made-up bill_summaries row, minus its bill_id."""
+    return {
+        "version_code": version_code,
+        "action_on": action_on,
+        "action_desc": action_desc,
+        "summary_text": text,
+        "summary_html_source": f"<p>{text}</p>",
+        "source_updated_at": datetime(2026, 1, 1, tzinfo=UTC),
+    }
+
+
+def add_bill(conn, bill_number=9999, summaries=()) -> None:
+    """Store a made-up House bill of the 119th Congress, sponsored by Pat Example.
+
+    The default number is the bill the made-up votes name ('H R 9999').
+    """
+    bill = {
+        "congress": 119,
+        "bill_type": "hr",
+        "bill_number": bill_number,
+        "title": "Example Act",
+        "policy_area": "Energy",
+        "sponsor_bioguide_id": "T000001",
+        "introduced_on": date(2025, 1, 15),
+        "latest_action_on": date(2025, 5, 9),
+        "latest_action": "Became Public Law.",
+        "source_url": f"https://example.test/bill/{bill_number}",
+        "source_updated_at": datetime(2026, 1, 1, tzinfo=UTC),
+    }
+    save_bill(conn, bill, list(summaries))
 
 
 def last_run(conn) -> dict:

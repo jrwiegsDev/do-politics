@@ -1,12 +1,14 @@
 """The DoPolitics API."""
 
 from collections.abc import Iterator
+from datetime import date
 from typing import Annotated, Literal
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
+from app.bills import find_bill
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.members import find_member
@@ -20,6 +22,39 @@ class LookupRequest(BaseModel):
     """The body of a lookup request. The address is used once and never stored."""
 
     address: str = Field(min_length=5, max_length=200)
+
+
+class SummaryOut(BaseModel):
+    """One official summary of a bill, as the API sends it."""
+
+    version_code: str
+    action_on: date
+    action_desc: str
+    summary_text: str
+
+
+class BillOut(BaseModel):
+    """A bill and its official summaries, as the API sends them.
+
+    Only the fields named here and in SummaryOut are ever sent, whatever the
+    query returned. That is what keeps a summary's original HTML off the wire.
+    """
+
+    congress: int
+    bill_type: str
+    bill_number: int
+    title: str
+    policy_area: str | None
+    sponsor_bioguide_id: str
+    sponsor_name: str
+    introduced_on: date
+    latest_action_on: date | None
+    latest_action: str | None
+    source_url: str
+    summaries: list[SummaryOut]
+
+
+BillType = Literal["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
 
 
 def get_conn() -> Iterator[psycopg.Connection]:
@@ -87,3 +122,24 @@ def member_votes(
         "member": member,
         "votes": find_recent_votes(conn, bioguide_id, limit, categories),
     }
+
+
+@app.get("/bills/{congress}/{bill_type}/{bill_number}", response_model=BillOut)
+def bill(
+    conn: Conn,
+    congress: Annotated[int, Path(ge=1)],
+    bill_type: BillType,
+    bill_number: Annotated[int, Path(ge=1)],
+) -> dict:
+    """Return a bill and its official summaries, newest stage first.
+
+    Each summary describes the bill at the stage it names, such as
+    'Passed Senate'. A bill with no official summary has an empty list.
+    """
+    found = find_bill(conn, congress, bill_type, bill_number)
+    if found is None:
+        raise HTTPException(
+            status_code=404, detail="No bill with that number is stored."
+        )
+
+    return found
