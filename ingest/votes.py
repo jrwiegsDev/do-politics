@@ -28,14 +28,13 @@ from ingest.categories import categorize, is_known
 from ingest.congress import session_year, sessions_to_check
 from ingest.db import connect
 from ingest.runs import record_run
+from ingest.user_agent import USER_AGENT
 
 # Both chambers publish vote times as Eastern time.
 EASTERN = ZoneInfo("America/New_York")
 
 SOURCES = {"house": "house-clerk", "senate": "senate-lis"}
 
-# Sent with every request, so the chambers' webmasters can see who is asking.
-USER_AGENT = "DoPolitics (https://github.com/jrwiegsDev/do-politics)"
 PAUSE_SECONDS = 0.5
 
 LAST_LOADED_SQL = """

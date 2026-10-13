@@ -1,6 +1,6 @@
 """Tests for looking up a member's recent votes."""
 
-from helpers import add_members, add_vote
+from helpers import add_bill, add_members, add_vote
 
 from app.votes import ALL_CATEGORIES, find_recent_votes
 
@@ -90,3 +90,52 @@ def test_member_with_no_votes_gets_an_empty_list(conn):
     add_members(conn)
 
     assert find_recent_votes(conn, PAT) == []
+
+
+def test_a_vote_on_a_stored_bill_carries_the_bill(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    vote = find_recent_votes(conn, PAT)[0]
+
+    assert vote["bill"] == {
+        "congress": 119,
+        "bill_type": "hr",
+        "bill_number": 9999,
+        "title": "Example Act",
+        "policy_area": "Energy",
+        "source_url": "https://example.test/bill/9999",
+    }
+
+
+def test_a_vote_on_a_bill_that_is_not_stored_has_no_bill(conn):
+    add_members(conn)
+    add_bill(conn, 1)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    vote = find_recent_votes(conn, PAT)[0]
+
+    assert vote["bill"] is None
+
+
+def test_the_bill_does_not_change_the_votes_own_title_or_link(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, title="On passing it")
+
+    vote = find_recent_votes(conn, PAT)[0]
+
+    assert vote["title"] == "On passing it"
+    assert vote["source_url"] == "https://example.test/house/1"
+    assert not [key for key in vote if key.startswith("bill_")]
+
+
+def test_a_stored_bill_does_not_repeat_or_drop_votes(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_bill(conn, 1)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 2, day=6, positions={PAT: "Nay"})
+
+    assert rolls(find_recent_votes(conn, PAT)) == [2, 1]

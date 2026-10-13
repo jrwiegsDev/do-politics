@@ -4,7 +4,16 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import REP_13, SENATOR_A, SENATOR_B, add, add_members, add_vote
+from helpers import (
+    REP_13,
+    SENATOR_A,
+    SENATOR_B,
+    add,
+    add_bill,
+    add_members,
+    add_vote,
+    summary,
+)
 
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
@@ -175,6 +184,124 @@ def test_unknown_member_is_404(client):
     assert response.status_code == 404
 
 
+def test_member_votes_carry_the_bill_each_one_is_about(client, conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={"T000001": "Yea"})
+
+    body = client.get("/members/T000001/votes").json()
+
+    assert body["votes"][0]["bill"] == {
+        "congress": 119,
+        "bill_type": "hr",
+        "bill_number": 9999,
+        "title": "Example Act",
+        "policy_area": "Energy",
+        "source_url": "https://example.test/bill/9999",
+    }
+
+
+def test_bill_returns_the_bill_and_its_summaries_newest_stage_first(client, conn):
+    add_members(conn)
+    add_bill(
+        conn,
+        summaries=[
+            summary("00", date(2025, 1, 15), "Introduced in House", "As introduced."),
+            summary("49", date(2025, 5, 9), "Public Law", "As enacted."),
+        ],
+    )
+
+    response = client.get("/bills/119/hr/9999")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "congress": 119,
+        "bill_type": "hr",
+        "bill_number": 9999,
+        "title": "Example Act",
+        "policy_area": "Energy",
+        "sponsor_bioguide_id": "T000001",
+        "sponsor_name": "Pat Example",
+        "introduced_on": "2025-01-15",
+        "latest_action_on": "2025-05-09",
+        "latest_action": "Became Public Law.",
+        "source_url": "https://example.test/bill/9999",
+        "summaries": [
+            {
+                "version_code": "49",
+                "action_on": "2025-05-09",
+                "action_desc": "Public Law",
+                "summary_text": "As enacted.",
+            },
+            {
+                "version_code": "00",
+                "action_on": "2025-01-15",
+                "action_desc": "Introduced in House",
+                "summary_text": "As introduced.",
+            },
+        ],
+    }
+
+
+def test_bill_with_no_official_summary_has_an_empty_list(client, conn):
+    add_members(conn)
+    add_bill(conn)
+
+    response = client.get("/bills/119/hr/9999")
+
+    assert response.status_code == 200
+    assert response.json()["summaries"] == []
+
+
+def test_bill_never_sends_the_original_html_even_if_the_query_returns_it(
+    client, conn, monkeypatch
+):
+    # The response's declared shape is the last guard. Here the lookup is
+    # made to hand over the stored HTML and the database's own id, as a
+    # careless change to the query might, and neither may be sent.
+    add_members(conn)
+    add_bill(conn)
+    leaky = {
+        "id": 1,
+        "congress": 119,
+        "bill_type": "hr",
+        "bill_number": 9999,
+        "title": "Example Act",
+        "policy_area": None,
+        "sponsor_bioguide_id": "T000001",
+        "sponsor_name": "Pat Example",
+        "introduced_on": date(2025, 1, 15),
+        "latest_action_on": None,
+        "latest_action": None,
+        "source_url": "https://example.test/bill/9999",
+        "summary_html_source": "<p>Top level.</p>",
+        "summaries": [
+            summary("49", date(2025, 5, 9), "Public Law", "As enacted.")
+            | {"bill_id": 1}
+        ],
+    }
+    monkeypatch.setattr("app.main.find_bill", lambda *args: leaky)
+
+    response = client.get("/bills/119/hr/9999")
+
+    assert response.status_code == 200
+    assert "summary_html_source" not in response.text
+    assert "<p>" not in response.text
+    assert set(response.json()["summaries"][0]) == {
+        "version_code",
+        "action_on",
+        "action_desc",
+        "summary_text",
+    }
+    assert "id" not in response.json()
+
+
+def test_unknown_bill_is_404(client):
+    response = client.get("/bills/119/hr/1")
+
+    assert response.status_code == 404
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -182,6 +309,11 @@ def test_unknown_member_is_404(client):
         "/members/T000001/votes?limit=0",
         "/members/T000001/votes?limit=101",
         "/members/T000001/votes?show=some",
+        "/bills/119/bill/1",
+        "/bills/119/HR/1",
+        "/bills/0/hr/1",
+        "/bills/119/hr/0",
+        "/bills/119/hr/one",
     ],
 )
 def test_malformed_requests_are_rejected(client, path):

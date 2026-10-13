@@ -4,9 +4,9 @@
 
 People say "I don't do politics." Politics does all of us.
 
-DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, summarized in plain language, and every way to contact them. There's no signup, no account and no donation ask.
+DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, each with the official summary of the bill it concerns, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has ever served in Congress, and a fourth loads every roll call vote of the current Congress from the House Clerk and the Senate, with each member's position. A second endpoint returns a member's most recent votes. No web app yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has ever served in Congress, and a fourth loads every roll call vote of the current Congress from the House Clerk and the Senate, with each member's position. A second endpoint returns a member's most recent votes. A fifth loader pulls each bill those votes name from the Congress.gov API, with its official summaries, and a third endpoint returns a bill and its summaries. No web app yet.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -26,7 +26,7 @@ DoPolitics takes a street address and returns every federal official who represe
 
 - Federal only: U.S. Senate and U.S. House
 - Contact channels: DC and district office phones, contact forms, mailing addresses, website, social
-- Recent roll-call votes with plain-language summaries
+- Recent roll-call votes, each with the official summary of the bill it concerns
 - State legislators and governors come after federal works end to end
 
 ## Privacy
@@ -35,7 +35,9 @@ Addresses are never stored. An address is geocoded, resolved to districts and di
 
 ## Summaries
 
-Vote and bill summaries are generated. Each one is labeled as generated, links to the official source, and follows a published editorial policy. The policy will be added before summaries ship.
+In v1 every summary is an official one: the Congressional Research Service summary of the bill, as published on Congress.gov. Each is shown with the stage of the bill it describes, its date, and a link to the bill's page. A bill with no official summary says so. No summary is written or reworded by this project or by a language model.
+
+Generated plain-language summaries may come later. If they do, each will be labeled as generated, link to the official source, and follow a published editorial policy.
 
 ## Stack (planned)
 
@@ -45,7 +47,7 @@ Vote and bill summaries are generated. Each one is labeled as generated, links t
 | Database | PostgreSQL + PostGIS |
 | Cache | Redis |
 | Migrations | Alembic, written as plain SQL |
-| Ingestion | Python, psycopg, pyshp |
+| Ingestion | Python, psycopg, pyshp, Beautiful Soup |
 | Dependencies | uv |
 | Local dev | Docker Compose (Postgres 18 + PostGIS 3.6) |
 | Testing | pytest, Playwright end-to-end |
@@ -107,7 +109,13 @@ Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or an
 
    With no session named, the loader works out the current one from today's date. To load an earlier session, name it with `--congress 119 --session 1`.
 
-9. Start the API. `--reload` restarts it when a file changes.
+9. Load the bills those votes name, with their official summaries. This needs a free key from [api.congress.gov/sign-up](https://api.congress.gov/sign-up), set as `CONGRESS_API_KEY` in `.env`. It is one or two requests per bill and takes several minutes. Add `--limit 3` to try it on a few bills first.
+
+   ```
+   uv run --env-file .env python -m ingest.bills
+   ```
+
+10. Start the API. `--reload` restarts it when a file changes.
 
    ```
    uv run --env-file .env uvicorn app.main:app --reload
@@ -243,7 +251,7 @@ uv run --env-file .env python -m ingest.votes --recategorize
 
 The loader also records which bill a vote concerns, in two columns added by `migrations/versions/0007_bills.py`. The House writes a bill as `H R 5103` and the Senate as `H.R. 5103`; `bill_for` in `ingest/bills.py` turns both into the type and number Congress.gov files the bill under, `hr` and `5103`. A vote that names no bill, such as a nomination or a quorum call, leaves both columns empty, and a check constraint keeps them filled or empty together. The same `--recategorize` command fills these columns for stored votes.
 
-The same migration creates the `bills` and `bill_summaries` tables, which will hold each bill's official title and its Congressional Research Service summaries from the [Congress.gov API](https://api.congress.gov/). Nothing loads them yet.
+The same migration creates the `bills` and `bill_summaries` tables, described under [Bills and summaries](#bills-and-summaries).
 
 The two chambers publish different formats, so each has its own parser, and both produce the same rows. The differences they absorb:
 
@@ -255,6 +263,26 @@ A session is filed under the year it starts in, and a vote cast in the first day
 
 Each position must belong to a row in `members` and each belongs to a row in `votes`, enforced by foreign keys, so run `ingest.members` first. A vote and its positions are committed together as soon as they are saved. A run that fails partway is recorded as failed in `ingestion_runs` and keeps what it had saved, and the next run carries on from there. The loader pauses between requests and identifies itself to the source.
 
+## Bills and summaries
+
+Two tables (`migrations/versions/0007_bills.py`) hold the bills. `bills` has one row per bill: its Congress, type and number, title, policy area, sponsor, the date it was introduced, its latest action, and a link to its page on Congress.gov. `bill_summaries` has one row per version of a bill's official summary. The Congressional Research Service writes a summary at each stage a bill reaches, such as "Introduced in House" or "Passed Senate", so a bill can have several, and each row records the stage and its date.
+
+`ingest/bills.py` loads them from the [Congress.gov API](https://api.congress.gov/):
+
+```
+uv run --env-file .env python -m ingest.bills
+```
+
+The loader's list of work is the stored votes: it asks for every bill that some vote names, and nothing else. A vote is tied to its bill by Congress, type and number, the same three values on both tables, so the votes loader never has to wait for this one. A vote on a bill that has not been loaded yet simply has no bill attached.
+
+The API key is read from `CONGRESS_API_KEY` and sent in a request header, never in the address, so it cannot end up in a logged URL or in a recorded error.
+
+Summaries are published as HTML. `html_to_text` in `ingest/plain_text.py` converts each one to plain text with [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/) at load time: a paragraph becomes a block set apart by a blank line, a list item becomes a line starting with a dash, and bold, italics and link addresses are dropped. The API serves only that text, so the web app never has to display markup written by another site. The original HTML is stored beside it and never served, so the conversion can be improved and re-applied later without downloading anything again.
+
+Some bills have no official summary, and some never get one. That is stored as a bill with no summary rows, and the API returns an empty list for it.
+
+The load is idempotent: a bill is keyed on its Congress, type and number, and a summary on its bill and version. Each bill is committed with its summaries as soon as it is saved, so a run that fails partway keeps what it had. A bill Congress.gov does not have is reported and skipped; any other failure, such as a refused key, fails the run. Each run is recorded in `ingestion_runs`. Every sponsor must be a row in `members`, so run `ingest.members` first.
+
 ## API
 
 The API is a FastAPI app in `app/main.py`.
@@ -264,6 +292,7 @@ The API is a FastAPI app in `app/main.py`.
 | `GET` | `/health` | Confirms the API is up and can reach the database |
 | `POST` | `/lookup` | Takes a street address, returns the district and its members of Congress |
 | `GET` | `/members/{bioguide_id}/votes` | Returns a member's most recent votes, newest first |
+| `GET` | `/bills/{congress}/{bill_type}/{bill_number}` | Returns a bill and its official summaries |
 
 ```
 curl -X POST http://127.0.0.1:8000/lookup \
@@ -309,13 +338,21 @@ curl "http://127.0.0.1:8000/members/B001315/votes?limit=2"
       "issue": "S 2403", "title": "Retire through Ownership Act",
       "result": "Passed", "category": "legislation",
       "source_url": "https://clerk.house.gov/evs/2026/roll314.xml",
-      "position": "Yea"
+      "position": "Yea",
+      "bill": {
+        "congress": 119, "bill_type": "s", "bill_number": 2403,
+        "title": "Retire through Ownership Act",
+        "policy_area": "...",
+        "source_url": "https://www.congress.gov/bill/119th-congress/senate-bill/2403"
+      }
     }
   ]
 }
 ```
 
 `find_recent_votes` in `app/votes.py` joins `vote_positions` to `votes` for one member. The member's ID comes from the `/lookup` response. It is a public identifier, unlike an address, so it is part of the URL.
+
+Each vote carries the bill it concerns, joined from `bills` with a `LEFT JOIN` so a vote with no bill is still returned. `bill` is `null` for a vote that names no bill, such as a confirmation, and for a bill that has not been loaded yet. The three values in it are the address of the bill's own endpoint.
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -330,13 +367,47 @@ curl "http://127.0.0.1:8000/members/B001315/votes?limit=2"
 
 Times are exact moments in UTC. Each vote links to the chamber's own record of it.
 
+### A bill and its summaries
+
+```
+curl http://127.0.0.1:8000/bills/119/hjres/20
+```
+
+```json
+{
+  "congress": 119, "bill_type": "hjres", "bill_number": 20,
+  "title": "Providing for congressional disapproval under chapter 8 of title 5, ...",
+  "policy_area": "Energy",
+  "sponsor_bioguide_id": "P000609", "sponsor_name": "...",
+  "introduced_on": "2025-01-15",
+  "latest_action_on": "2025-05-09", "latest_action": "Became Public Law No: 119-6.",
+  "source_url": "https://www.congress.gov/bill/119th-congress/house-joint-resolution/20",
+  "summaries": [
+    {"version_code": "49", "action_on": "2025-05-09", "action_desc": "Public Law", "summary_text": "..."},
+    {"version_code": "00", "action_on": "2025-01-15", "action_desc": "Introduced in House", "summary_text": "..."}
+  ]
+}
+```
+
+`find_bill` in `app/bills.py` reads the bill, then its summaries, newest stage first. A summary describes the bill at the stage it names, not at the moment of any one vote, so each carries its stage and date and the page can say which version it is showing.
+
+The list of votes carries only a bill's title and link, and the summaries are fetched here when a bill is opened. One summary can run past 170,000 characters, so sending them with every vote in a list would make each response large for text that is mostly never read.
+
+The summary's original HTML is never sent, and three things keep it that way: the query names its columns and leaves that one out, the endpoint declares the shape of its response so anything not named in it is dropped, and a test hands the endpoint the HTML on purpose and checks it does not come out.
+
+| Outcome | Response |
+|---|---|
+| Bill found | `200` with the bill and a list of summaries, which is empty if it has none |
+| Bill is not stored | `404` |
+| Unknown bill type, or a Congress or number below 1 | `422` |
+
 ## Tests
 
 ```
 uv run --env-file .env pytest
 ```
 
-The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials and members tests use made-up members rather than the live files, so they don't fail when a real member leaves office. The votes tests use made-up roll calls in each chamber's real layout. The geocoder and API tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
+The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials and members tests use made-up members rather than the live files, so they don't fail when a real member leaves office. The votes tests use made-up roll calls in each chamber's real layout, and the bills tests a made-up bill in the layout Congress.gov sends, so none needs an API key. The geocoder and API tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 
@@ -346,7 +417,7 @@ To see which lines no test runs, add `--cov`:
 uv run --env-file .env pytest --cov
 ```
 
-This uses [pytest-cov](https://pytest-cov.readthedocs.io/) and prints, for each file in `app/` and `ingest/`, the share of lines the tests ran and the line numbers they missed. CI runs it this way and fails if the total drops below the floor set in `pyproject.toml`. The floor sits just under the measured figure, so coverage cannot slide unnoticed; it is not a target. What is left untested on purpose is the downloading itself and the command-line entry points of the districts, officials and members loaders. The votes loader's entry point is tested, because it enforces rules about which arguments go together.
+This uses [pytest-cov](https://pytest-cov.readthedocs.io/) and prints, for each file in `app/` and `ingest/`, the share of lines the tests ran and the line numbers they missed. CI runs it this way and fails if the total drops below the floor set in `pyproject.toml`. The floor sits just under the measured figure, so coverage cannot slide unnoticed; it is not a target. What is left untested on purpose is the downloading itself and the command-line entry points of the districts, officials, members and bills loaders. The votes loader's entry point is tested, because it enforces rules about which arguments go together.
 
 ## Code checks
 

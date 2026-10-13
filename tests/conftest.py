@@ -66,8 +66,9 @@ def committing_conn(conn):
     """A connection for testing code that commits, such as a loader's load().
 
     The usual rollback cannot undo a commit, so this removes what the test
-    left behind, and the next test still starts from the same data. Votes go
-    first, because a member with a recorded vote cannot be deleted.
+    left behind, and the next test still starts from the same data. Votes and
+    bills go first, because a member with a recorded vote or a sponsored bill
+    cannot be deleted.
     """
     last_run = conn.execute("SELECT coalesce(max(id), 0) FROM ingestion_runs")
     last_run_id = last_run.fetchone()[0]
@@ -77,6 +78,7 @@ def committing_conn(conn):
 
     conn.rollback()
     conn.execute("DELETE FROM votes")
+    conn.execute("DELETE FROM bills")
     conn.execute("DELETE FROM officials")
     conn.execute("DELETE FROM members")
     conn.execute("DELETE FROM ingestion_runs WHERE id > %s", [last_run_id])
