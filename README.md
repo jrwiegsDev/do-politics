@@ -291,15 +291,17 @@ The API is a FastAPI app in `app/main.py`.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Confirms the API is up and can reach the database |
-| `POST` | `/lookup` | Takes a street address, returns the district and its members of Congress |
+| `POST` | `/lookup` | Takes a street address in four fields, returns the district and its members of Congress |
 | `GET` | `/members/{bioguide_id}/votes` | Returns a member's most recent votes, newest first |
 | `GET` | `/bills/{congress}/{bill_type}/{bill_number}` | Returns a bill and its official summaries |
 
 ```
 curl -X POST http://127.0.0.1:8000/lookup \
   -H 'Content-Type: application/json' \
-  -d '{"address": "401 S 2nd St, Springfield, IL 62701"}'
+  -d '{"street": "401 S 2nd St", "city": "Springfield", "state": "IL", "zip_code": "62701"}'
 ```
+
+The address is four fields, not one line, so nobody has to guess where the commas go. `Address` in `app/address.py` holds the rules, and the API and the web app both use it: a street is required, with either a ZIP code or a city and state. The state is its two-letter abbreviation and the ZIP code is five digits.
 
 ```json
 {
@@ -317,7 +319,7 @@ A request runs three steps: `geocode` in `app/geocoder.py` asks the Census Geoco
 | House seat is vacant | `200` with `"representative": null` |
 | DC or a territory | `200` with an empty `senators` list |
 | Address not found, or outside every district | `404` |
-| Address missing, too short or too long | `422` |
+| Street missing or too short, no ZIP code and no city with a state, or a malformed state or ZIP code | `422` |
 | Census Geocoder unreachable | `503` |
 
 The lookup is a `POST` with the address in the request body on purpose. A `GET` would put the address in the URL, and URLs are written to access logs by web servers and proxies. The HTTP client's own request logging is turned down for the same reason, and a geocoder failure is reported by its type only, because the full error message contains the request URL.
@@ -412,6 +414,8 @@ The pages are built on the server by the same FastAPI app that serves the API, s
 | `POST` | `/tiles/officials` | The officials tile for an address, as a piece of HTML |
 
 The page is made of tiles. Submitting the address does not load a new page: HTMX posts the form, the server answers with the HTML for one tile, and HTMX puts it into the page. The page routes call the same functions as the JSON endpoints (`geocode`, then `lookup`), so the API and the page cannot disagree. When an address can't be resolved, the tile holds a plain message and the response carries the same status code `/lookup` would give.
+
+The form has separate fields for street, city, state and ZIP code. Each one names what it holds with a standard `autocomplete` value, so a browser can fill all four from an address it has saved, with no outside suggestion service involved. A service that suggests addresses as you type would have to be sent each keystroke, which is why v1 does not use one.
 
 The privacy rules hold here too. The address travels in the body of a `POST` and is never sent back in the HTML or written to a log. The form also declares `method="post"`, because a form sends with `GET` by default and that would put the address in the URL if the script ever failed to load. The stylesheet and the script are served from this app, so opening the page asks no other site for anything.
 

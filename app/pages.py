@@ -6,7 +6,9 @@ from typing import Annotated
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 
+from app.address import Address
 from app.deps import Conn
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
@@ -32,9 +34,22 @@ def index(request: Request) -> HTMLResponse:
 def officials_tile(
     request: Request,
     conn: Conn,
-    address: Annotated[str, Form(min_length=5, max_length=200)],
+    street: Annotated[str, Form()] = "",
+    city: Annotated[str, Form()] = "",
+    state: Annotated[str, Form()] = "",
+    zip_code: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
     """Return the officials tile for an address, or a message saying why not."""
+    try:
+        address = Address(street=street, city=city, state=state, zip_code=zip_code)
+    except ValidationError:
+        # The error itself is not used: its text quotes what was typed.
+        return message(
+            request,
+            "Enter a street address with a ZIP code, or with a city and state.",
+            422,
+        )
+
     try:
         point = geocode(address)
     except GeocoderUnavailable:
@@ -43,7 +58,11 @@ def officials_tile(
         )
 
     if point is None:
-        return message(request, "That address could not be found.", 404)
+        return message(
+            request,
+            "Sorry! We couldn't locate that address. Try typing it in again.",
+            404,
+        )
 
     longitude, latitude = point
     result = lookup(conn, longitude, latitude)

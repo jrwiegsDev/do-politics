@@ -5,18 +5,56 @@ import logging
 import httpx2
 import pytest
 
+from app.address import Address
 from app.geocoder import GEOCODER_URL, GeocoderUnavailable, geocode
 
-ADDRESS = "401 S 2nd St, Springfield, IL 62701"
+ADDRESS = Address(
+    street="401 S 2nd St", city="Springfield", state="IL", zip_code="62701"
+)
 MATCH = {"result": {"addressMatches": [{"coordinates": {"x": -89.6535, "y": 39.7983}}]}}
 NO_MATCH = {"result": {"addressMatches": []}}
 
 
 def answer_with(monkeypatch, status_code, body):
     """Make httpx2.get return a canned response instead of calling the Census."""
-    request = httpx2.Request("GET", GEOCODER_URL, params={"address": ADDRESS})
+    request = httpx2.Request("GET", GEOCODER_URL, params={"street": ADDRESS.street})
     response = httpx2.Response(status_code, json=body, request=request)
     monkeypatch.setattr("app.geocoder.httpx2.get", lambda *args, **kwargs: response)
+
+
+def sent_params(monkeypatch, address):
+    """Geocode an address and return the parameters that would go to the Census."""
+    sent = {}
+
+    def record(url, params, timeout):
+        sent.update(params)
+        request = httpx2.Request("GET", url)
+        return httpx2.Response(200, json=MATCH, request=request)
+
+    monkeypatch.setattr("app.geocoder.httpx2.get", record)
+    geocode(address)
+    return sent
+
+
+def test_every_field_given_is_sent_under_the_name_the_census_uses(monkeypatch):
+    assert sent_params(monkeypatch, ADDRESS) == {
+        "street": "401 S 2nd St",
+        "city": "Springfield",
+        "state": "IL",
+        "zip": "62701",
+        "benchmark": "Public_AR_Current",
+        "format": "json",
+    }
+
+
+def test_a_blank_field_is_left_out_of_the_request(monkeypatch):
+    street_and_zip = Address(street="401 S 2nd St", zip_code="62701")
+
+    sent = sent_params(monkeypatch, street_and_zip)
+
+    assert "city" not in sent
+    assert "state" not in sent
+    assert sent["zip"] == "62701"
 
 
 def test_matched_address_returns_longitude_then_latitude(monkeypatch):

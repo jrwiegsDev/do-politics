@@ -20,7 +20,12 @@ from app.main import app, get_conn
 
 CAPITOL = (-89.6548, 39.7984)
 MID_ATLANTIC = (-40.0, 35.0)
-ADDRESS = {"address": "401 S 2nd St, Springfield, IL 62701"}
+ADDRESS = {
+    "street": "401 S 2nd St",
+    "city": "Springfield",
+    "state": "IL",
+    "zip_code": "62701",
+}
 
 
 def seated(row):
@@ -106,10 +111,27 @@ def test_geocoder_outage_is_503(client, monkeypatch):
     assert response.status_code == 503
 
 
-def test_address_that_is_too_short_is_rejected(client):
-    response = client.post("/lookup", json={"address": "x"})
+def test_street_that_is_too_short_is_rejected(client):
+    response = client.post("/lookup", json={"street": "x", "zip_code": "62701"})
 
     assert response.status_code == 422
+
+
+def test_street_with_no_zip_code_or_city_and_state_is_rejected(client):
+    response = client.post("/lookup", json={"street": "401 S 2nd St"})
+
+    assert response.status_code == 422
+
+
+def test_street_and_zip_code_alone_are_accepted(client, conn, monkeypatch):
+    add(conn, seated(SENATOR_A))
+    geocode_to(monkeypatch, CAPITOL)
+
+    response = client.post(
+        "/lookup", json={"street": "401 S 2nd St", "zip_code": "62701"}
+    )
+
+    assert response.status_code == 200
 
 
 def test_address_cannot_be_sent_in_the_url(client):

@@ -17,10 +17,33 @@
        default method is GET, which would put the address in the URL. #}
     <form method="post" action="/tiles/officials"
           hx-post="/tiles/officials" hx-target="#officials-tile" hx-swap="innerHTML">
-      <label for="address">Street address</label>
-      <input id="address" name="address" type="text" required
-             minlength="5" maxlength="200" autocomplete="street-address"
-             placeholder="401 S 2nd St, Springfield, IL 62701">
+      {# The autocomplete values tell the browser which saved detail belongs
+         in each field, so it can fill all four without any outside service. #}
+      <div class="field field-street">
+        <label for="street">Street address</label>
+        <input id="street" name="street" type="text" required
+               minlength="3" maxlength="100" autocomplete="address-line1"
+               placeholder="401 S 2nd St">
+      </div>
+      <div class="field field-city">
+        <label for="city">City</label>
+        <input id="city" name="city" type="text"
+               maxlength="100" autocomplete="address-level2"
+               placeholder="Springfield">
+      </div>
+      <div class="field field-state">
+        <label for="state">State</label>
+        <input id="state" name="state" type="text"
+               minlength="2" maxlength="2" autocomplete="address-level1"
+               placeholder="IL">
+      </div>
+      <div class="field field-zip">
+        <label for="zip_code">ZIP code</label>
+        <input id="zip_code" name="zip_code" type="text" inputmode="numeric"
+               pattern="[0-9]{5}" maxlength="5" autocomplete="postal-code"
+               placeholder="62701">
+      </div>
+      <p class="hint">Enter a ZIP code, or a city and state, or all three.</p>
       <button type="submit">Find my officials</button>
     </form>
   </section>

@@ -13,7 +13,12 @@ from app.main import app, get_conn
 CAPITOL = (-89.6548, 39.7984)
 MID_ATLANTIC = (-40.0, 35.0)
 STREET = "401 S 2nd St"
-ADDRESS = {"address": f"{STREET}, Springfield, IL 62701"}
+ADDRESS = {
+    "street": STREET,
+    "city": "Springfield",
+    "state": "IL",
+    "zip_code": "62701",
+}
 
 
 def seated(row):
@@ -41,7 +46,22 @@ def test_front_page_has_a_form_that_posts_the_address(client):
     assert response.headers["content-type"].startswith("text/html")
     assert 'method="post"' in response.text
     assert 'hx-post="/tiles/officials"' in response.text
-    assert 'name="address"' in response.text
+
+
+@pytest.mark.parametrize(
+    ("name", "autocomplete"),
+    [
+        ("street", "address-line1"),
+        ("city", "address-level2"),
+        ("state", "address-level1"),
+        ("zip_code", "postal-code"),
+    ],
+)
+def test_each_address_field_tells_the_browser_what_it_holds(client, name, autocomplete):
+    page = client.get("/").text
+
+    assert f'name="{name}"' in page
+    assert f'autocomplete="{autocomplete}"' in page
 
 
 def test_front_page_asks_no_other_site_for_anything(client):
@@ -107,7 +127,9 @@ def test_address_the_geocoder_cannot_match_gets_a_message_and_404(client, monkey
     response = client.post("/tiles/officials", data=ADDRESS)
 
     assert response.status_code == 404
-    assert "That address could not be found." in response.text
+    # The apostrophe is escaped in the HTML, so the test checks around it.
+    assert "Sorry! We couldn" in response.text
+    assert "locate that address. Try typing it in again." in response.text
 
 
 def test_point_outside_every_district_gets_a_message_and_404(client, monkeypatch):
@@ -131,10 +153,34 @@ def test_geocoder_outage_gets_a_message_and_503(client, monkeypatch):
     assert "The address service is unavailable." in response.text
 
 
-def test_address_that_is_too_short_is_rejected(client):
-    response = client.post("/tiles/officials", data={"address": "x"})
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"street": "x", "zip_code": "62701"},
+        {"street": STREET},
+        {"street": STREET, "city": "Springfield"},
+        {"street": STREET, "zip_code": "6270"},
+        {},
+    ],
+)
+def test_an_address_that_breaks_a_rule_gets_a_message_and_422(client, fields):
+    response = client.post("/tiles/officials", data=fields)
 
     assert response.status_code == 422
+    assert "Enter a street address with a ZIP code" in response.text
+    assert STREET not in response.text
+
+
+def test_street_and_zip_code_alone_are_accepted(client, conn, monkeypatch):
+    add(conn, seated(SENATOR_A))
+    geocode_to(monkeypatch, CAPITOL)
+
+    response = client.post(
+        "/tiles/officials", data={"street": STREET, "zip_code": "62701"}
+    )
+
+    assert response.status_code == 200
+    assert "Alex Senator" in response.text
 
 
 def test_address_cannot_be_sent_in_the_url(client):

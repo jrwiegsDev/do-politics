@@ -6,8 +6,9 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.address import Address
 from app.bills import find_bill
 
 # get_conn is imported so that `from app.main import get_conn` keeps working.
@@ -28,12 +29,6 @@ app.mount(
     name="static",
 )
 app.include_router(pages_router)
-
-
-class LookupRequest(BaseModel):
-    """The body of a lookup request. The address is used once and never stored."""
-
-    address: str = Field(min_length=5, max_length=200)
 
 
 class SummaryOut(BaseModel):
@@ -77,10 +72,13 @@ def health(conn: Conn) -> dict:
 
 
 @app.post("/lookup")
-def lookup_address(request: LookupRequest, conn: Conn) -> dict:
-    """Return the district and the members of Congress for a street address."""
+def lookup_address(address: Address, conn: Conn) -> dict:
+    """Return the district and the members of Congress for a street address.
+
+    The address is the request body. It is used once and never stored.
+    """
     try:
-        point = geocode(request.address)
+        point = geocode(address)
     except GeocoderUnavailable:
         raise HTTPException(
             status_code=503,
