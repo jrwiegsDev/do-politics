@@ -4,7 +4,7 @@ from datetime import date
 
 from helpers import MISSOURI_SENATOR, REP_12, REP_13, SENATOR_A, SENATOR_B, add, names
 
-from app.officials import find_officials
+from app.officials import find_official, find_officials
 
 ON_DATE = date(2026, 6, 1)
 
@@ -41,3 +41,22 @@ def test_member_is_left_out_from_the_day_the_term_ends(conn):
 
     assert names(last_day) == ["Casey Rep"]
     assert names(end_day) == []
+
+
+def test_one_official_is_found_by_bioguide_id(conn):
+    add(conn, SENATOR_A, REP_13)
+
+    found = find_official(conn, "T000012")
+
+    assert found is not None
+    assert (found["name"], found["chamber"], found["district_code"]) == (
+        "Casey Rep",
+        "house",
+        "13",
+    )
+
+
+def test_an_id_nobody_holds_a_seat_under_finds_nothing(conn):
+    add(conn, SENATOR_A)
+
+    assert find_official(conn, "T000012") is None

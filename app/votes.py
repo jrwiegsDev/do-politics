@@ -1,4 +1,4 @@
-"""Find a member's recent votes."""
+"""Find a member's recent votes, the topics they cover, and their attendance."""
 
 import psycopg
 from psycopg.rows import dict_row
@@ -22,8 +22,34 @@ LEFT JOIN bills b
  AND b.bill_number = v.bill_number
 WHERE p.bioguide_id = %(bioguide_id)s
   AND v.category = ANY(%(categories)s)
+  AND (%(policy_area)s::text IS NULL OR b.policy_area = %(policy_area)s)
 ORDER BY v.voted_at DESC, v.roll_number DESC
-LIMIT %(limit)s;
+LIMIT %(limit)s OFFSET %(offset)s;
+"""
+
+FIND_POLICY_AREAS_SQL = """
+SELECT DISTINCT b.policy_area
+FROM vote_positions p
+JOIN votes v ON v.id = p.vote_id
+JOIN bills b
+  ON b.congress = v.congress
+ AND b.bill_type = v.bill_type
+ AND b.bill_number = v.bill_number
+WHERE p.bioguide_id = %(bioguide_id)s
+  AND v.category = ANY(%(categories)s)
+  AND b.policy_area IS NOT NULL
+ORDER BY b.policy_area;
+"""
+
+FIND_ATTENDANCE_SQL = """
+SELECT v.congress, v.session,
+       count(*) AS roll_calls,
+       count(*) FILTER (WHERE p.position <> 'Not Voting') AS votes_cast
+FROM vote_positions p
+JOIN votes v ON v.id = p.vote_id
+WHERE p.bioguide_id = %(bioguide_id)s
+GROUP BY v.congress, v.session
+ORDER BY v.congress DESC, v.session DESC;
 """
 
 
@@ -46,19 +72,43 @@ def find_recent_votes(
     bioguide_id: str,
     limit: int = 20,
     categories: list[str] | None = None,
+    policy_area: str | None = None,
+    offset: int = 0,
 ) -> list[dict]:
     """Return a member's most recent votes, newest first, with their position on each.
 
     Unless other categories are asked for, only final votes on legislation
     and nominations are returned. Each vote carries the bill it is about,
-    when that bill is stored.
+    when that bill is stored. Naming a policy area keeps only votes on bills
+    in that area. The offset skips that many votes, for the page after the first.
     """
     params = {
         "bioguide_id": bioguide_id,
         "categories": categories or FINAL_CATEGORIES,
+        "policy_area": policy_area,
         "limit": limit,
+        "offset": offset,
     }
     with conn.cursor(row_factory=dict_row) as cur:
         votes = cur.execute(FIND_RECENT_VOTES_SQL, params).fetchall()
 
     return [nest_bill(vote) for vote in votes]
+
+
+def find_policy_areas(conn: psycopg.Connection, bioguide_id: str) -> list[str]:
+    """Return the policy areas of the bills behind a member's final votes, A to Z."""
+    params = {"bioguide_id": bioguide_id, "categories": FINAL_CATEGORIES}
+    rows = conn.execute(FIND_POLICY_AREAS_SQL, params).fetchall()
+    return [policy_area for (policy_area,) in rows]
+
+
+def find_attendance(conn: psycopg.Connection, bioguide_id: str) -> list[dict]:
+    """Return a member's attendance for each session, newest session first.
+
+    roll_calls is how many roll calls listed the member, and votes_cast is
+    how many of those they voted in. Every roll call counts, procedural ones
+    and quorum calls included. 'Present' counts as taking part.
+    """
+    params = {"bioguide_id": bioguide_id}
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(FIND_ATTENDANCE_SQL, params).fetchall()

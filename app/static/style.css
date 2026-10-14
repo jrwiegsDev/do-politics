@@ -99,6 +99,52 @@ body {
   }
 }
 
+/* After a lookup the page is laid out to fit one screen: the greeting steps
+   aside, the address form folds into one row, and once a member is chosen
+   the officials and member tiles share a fixed height and scroll inside
+   themselves. When the bill tile opens, all three share the height. On a
+   short screen the clamp() minimums win and the page itself scrolls. */
+.page:has(#officials-tile:not(:empty)) .intro {
+  display: none;
+}
+
+@media (min-width: 50rem) {
+  .tiles:has(#officials-tile:not(:empty)) #address-tile form {
+    grid-template-columns:
+      minmax(0, 3fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.5fr)
+      auto;
+    align-items: end;
+  }
+
+  .tiles:has(#officials-tile:not(:empty)) #address-tile .field-street,
+  .tiles:has(#officials-tile:not(:empty)) #address-tile button {
+    grid-column: auto;
+  }
+
+  .tiles:has(#officials-tile:not(:empty)) #address-tile .hint {
+    display: none;
+  }
+}
+
+.tiles:has(#member-tile:not(:empty)) #officials-tile,
+.tiles:has(#member-tile:not(:empty)) #member-tile {
+  height: clamp(18rem, 62vh, 44rem);
+}
+
+.tiles:has(#bill-tile:not(:empty)) #officials-tile,
+.tiles:has(#bill-tile:not(:empty)) #member-tile,
+#bill-tile {
+  height: clamp(16rem, 36vh, 30rem);
+}
+
+#officials-tile,
+#member-tile,
+#bill-tile {
+  overflow-y: auto;
+  /* Scrolling to the end of a tile does not start scrolling the page. */
+  overscroll-behavior: contain;
+}
+
 .tile {
   background: var(--tile);
   border: 1px solid var(--line);
@@ -190,8 +236,18 @@ a:focus-visible {
   border-top: 0;
 }
 
+/* A name is a button that looks like a link: it does something on this page
+   and does not go to another one. */
 .official-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
   font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .official-role,
@@ -202,4 +258,67 @@ a:focus-visible {
 
 .message {
   margin: 0;
+}
+
+/* The member tile. */
+.tile h3 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.contact,
+.attendance,
+.votes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contact li,
+.attendance li {
+  padding: 0.125rem 0;
+}
+
+.topic-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.topic-filter label {
+  font-weight: 600;
+}
+
+select {
+  max-width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--tile);
+  font: inherit;
+}
+
+.vote {
+  padding: 0.625rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.vote-title {
+  font-weight: 600;
+}
+
+.vote-detail,
+.vote-none {
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.vote-more {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+a {
+  color: var(--accent);
 }
