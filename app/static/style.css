@@ -116,7 +116,8 @@ body {
   font-size: 1.125rem;
 }
 
-/* The address form. */
+/* The address form. The street takes a full row; city, state and ZIP code
+   share the next one. On a narrow screen every field gets its own row. */
 #address-tile label {
   display: block;
   margin-bottom: 0.375rem;
@@ -125,7 +126,26 @@ body {
 
 #address-tile form {
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 30rem) {
+  #address-tile form {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 2fr);
+  }
+
+  .field-street,
+  .hint,
+  #address-tile button {
+    grid-column: 1 / -1;
+  }
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
 input[type="text"] {

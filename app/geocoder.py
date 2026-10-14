@@ -4,7 +4,9 @@ import logging
 
 import httpx2
 
-GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+from app.address import Address
+
+GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/address"
 BENCHMARK = "Public_AR_Current"
 TIMEOUT_SECONDS = 10
 
@@ -17,12 +19,20 @@ class GeocoderUnavailable(Exception):
     """The Census Geocoder could not be reached or gave an unusable answer."""
 
 
-def geocode(address: str) -> tuple[float, float] | None:
+def geocode(address: Address) -> tuple[float, float] | None:
     """Return the (longitude, latitude) of a street address, or None if it has no match.
 
     The coordinates are NAD83, the same system the district boundaries use.
     """
-    params = {"address": address, "benchmark": BENCHMARK, "format": "json"}
+    fields = {
+        "street": address.street,
+        "city": address.city,
+        "state": address.state,
+        "zip": address.zip_code,
+    }
+    # A blank field is left out, so the Census is only sent what was given.
+    params = {name: value for name, value in fields.items() if value}
+    params |= {"benchmark": BENCHMARK, "format": "json"}
     try:
         response = httpx2.get(GEOCODER_URL, params=params, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
