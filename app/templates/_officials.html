@@ -1,0 +1,17 @@
+<h2>{{ district.name }}</h2>
+<ul class="officials">
+  {% for senator in senators %}
+  <li>
+    <div class="official-name">{{ senator.name }}</div>
+    <div class="official-role">Senator ({{ senator.party }}, {{ senator.state }})</div>
+  </li>
+  {% endfor %}
+  <li>
+    {% if representative %}
+    <div class="official-name">{{ representative.name }}</div>
+    <div class="official-role">Representative ({{ representative.party }}, {{ representative.state }})</div>
+    {% else %}
+    <div class="vacant">This House seat is currently vacant.</div>
+    {% endif %}
+  </li>
+</ul>
