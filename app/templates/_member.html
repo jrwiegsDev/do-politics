@@ -1,0 +1,55 @@
+<h2>{{ official.name }}</h2>
+<p class="official-role">
+  {{ "Senator" if official.chamber == "senate" else "Representative" }}
+  ({{ official.party }}, {{ official.state }})
+</p>
+
+<ul class="contact">
+  {% if official.phone %}
+  <li>Phone: <a href="tel:{{ official.phone }}">{{ official.phone }}</a></li>
+  {% endif %}
+  {% if official.office_address %}
+  <li>Office: {{ official.office_address }}</li>
+  {% endif %}
+  {# Only a web address is ever made into a link. #}
+  {% if official.website and official.website.startswith("https://") %}
+  <li><a href="{{ official.website }}" rel="noopener">Official website</a></li>
+  {% endif %}
+  {% if official.contact_form and official.contact_form.startswith("https://") %}
+  <li><a href="{{ official.contact_form }}" rel="noopener">Contact form</a></li>
+  {% endif %}
+</ul>
+
+<h3>Attendance</h3>
+{% if attendance %}
+<ul class="attendance">
+  {% for row in attendance %}
+  <li>
+    Congress {{ row.congress }}, session {{ row.session }}:
+    voted in {{ row.votes_cast }} of {{ row.roll_calls }} roll calls
+    ({{ "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%)
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="vote-none">No roll calls are on record for this member yet.</p>
+{% endif %}
+
+<h3>Votes</h3>
+{# Choosing a topic asks the server for that topic's rows and puts them in
+   the list below. hx-include sends this form's own field with the request. #}
+<form class="topic-filter"
+      hx-get="/tiles/members/{{ bioguide_id }}/votes" hx-trigger="change"
+      hx-include="this" hx-target="#vote-list" hx-swap="innerHTML">
+  <label for="topic">Topic</label>
+  <select id="topic" name="topic">
+    <option value="">All topics</option>
+    {% for area in topics %}
+    <option value="{{ area }}">{{ area }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+<ul class="votes" id="vote-list">
+  {% include "_vote_rows.html" %}
+</ul>

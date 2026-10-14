@@ -16,6 +16,13 @@ WHERE state_fips = %(state_fips)s
 ORDER BY chamber DESC, name;
 """
 
+FIND_OFFICIAL_SQL = """
+SELECT bioguide_id, name, party, chamber, state, district_code,
+       phone, office_address, website, contact_form
+FROM officials
+WHERE bioguide_id = %(bioguide_id)s;
+"""
+
 
 def find_officials(
     conn: psycopg.Connection,
@@ -34,3 +41,9 @@ def find_officials(
     }
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(FIND_OFFICIALS_SQL, params).fetchall()
+
+
+def find_official(conn: psycopg.Connection, bioguide_id: str) -> dict | None:
+    """Return the sitting member with this Bioguide ID, or None if nobody holds a seat."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(FIND_OFFICIAL_SQL, {"bioguide_id": bioguide_id}).fetchone()

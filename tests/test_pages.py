@@ -5,7 +5,16 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import REP_13, SENATOR_A, SENATOR_B, add
+from helpers import (
+    REP_13,
+    SENATOR_A,
+    SENATOR_B,
+    add,
+    add_bill,
+    add_members,
+    add_vote,
+    official,
+)
 
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
@@ -201,3 +210,199 @@ def test_address_is_never_sent_back_or_logged(client, conn, monkeypatch, caplog)
     assert STREET not in found.text
     assert STREET not in not_found.text
     assert STREET not in caplog.text
+
+
+# The member tile. Pat Example is in the made-up members, so votes can be
+# stored for that ID, and here also holds a House seat.
+PAT = "T000001"
+PAT_IN_OFFICE = official(PAT, "Pat Example", "house", "13") | {
+    "phone": "202-555-0100",
+    "office_address": "1 Example House Office Building",
+    "website": "https://example.test/pat",
+}
+
+
+def add_pat(conn):
+    """Store Pat Example as a member and as a sitting representative."""
+    add_members(conn)
+    add(conn, seated(PAT_IN_OFFICE))
+
+
+def test_each_official_in_the_tile_opens_their_member_tile(client, conn, monkeypatch):
+    add(conn, seated(SENATOR_A), seated(REP_13))
+    geocode_to(monkeypatch, CAPITOL)
+
+    tile = client.post("/tiles/officials", data=ADDRESS).text
+
+    assert 'hx-get="/tiles/members/T000010"' in tile
+    assert 'hx-get="/tiles/members/T000012"' in tile
+    assert 'hx-target="#member-tile"' in tile
+
+
+def test_member_tile_shows_who_they_are_and_how_to_reach_them(client, conn):
+    add_pat(conn)
+
+    response = client.get(f"/tiles/members/{PAT}")
+
+    assert response.status_code == 200
+    assert "<html" not in response.text
+    assert "Pat Example" in response.text
+    assert "Representative" in response.text
+    assert "202-555-0100" in response.text
+    assert "1 Example House Office Building" in response.text
+    assert 'href="https://example.test/pat"' in response.text
+
+
+def test_member_tile_never_links_to_something_that_is_not_a_web_address(client, conn):
+    add_members(conn)
+    add(conn, seated(PAT_IN_OFFICE | {"website": "javascript:alert(1)"}))
+
+    response = client.get(f"/tiles/members/{PAT}")
+
+    assert "javascript:" not in response.text
+
+
+def test_member_tile_shows_attendance_for_the_session(client, conn):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 2, day=6, positions={PAT: "Not Voting"})
+    add_vote(conn, 3, day=7, positions={PAT: "Nay"})
+    add_vote(conn, 4, day=8, positions={PAT: "Yea"})
+
+    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+
+    assert "Congress 119, session 2: voted in 3 of 4 roll calls (75.0%)" in tile
+
+
+def test_member_tile_lists_votes_newest_first_with_the_position(client, conn):
+    add_pat(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, title="Older Act")
+    add_vote(conn, 2, day=6, positions={PAT: "Nay"}, issue="H R 7777", title="New Act")
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert tile.index("New Act") < tile.index("Example Act")
+    assert "Nay" in tile
+    assert "Yea" in tile
+    assert "Jan 6, 2026" in tile
+
+
+def test_member_tile_offers_each_topic_once(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999, policy_area="Health")
+    add_bill(conn, 8888, policy_area="Energy")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 3, day=7, positions={PAT: "Yea"}, issue="H R 8888")
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert tile.count('<option value="Health">') == 1
+    assert tile.count('<option value="Energy">') == 1
+    assert '<option value="">All topics</option>' in tile
+
+
+def test_member_tile_for_an_id_nobody_holds_a_seat_under_is_404(client, conn):
+    add_members(conn)
+
+    response = client.get(f"/tiles/members/{PAT}")
+
+    assert response.status_code == 404
+    assert "Nobody holding a seat in Congress has that ID." in response.text
+
+
+def test_member_tile_refuses_a_malformed_id(client):
+    assert client.get("/tiles/members/not-an-id").status_code == 422
+
+
+def test_member_tile_with_no_votes_says_so(client, conn):
+    add_pat(conn)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert "No roll calls are on record for this member yet." in tile
+    assert "No votes to show." in tile
+    assert "Show more votes" not in tile
+
+
+def add_votes(conn, how_many):
+    """Store that many final votes for Pat, one a day, roll 1 the oldest."""
+    for number in range(1, how_many + 1):
+        title = f"Act {number}"
+        add_vote(conn, number, day=number, positions={PAT: "Yea"}, title=title)
+
+
+def test_first_page_holds_twenty_votes_and_offers_more(client, conn):
+    add_pat(conn)
+    add_votes(conn, 25)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert tile.count('class="vote"') == 20
+    assert "Act 25<" in tile
+    assert "Act 6<" in tile
+    assert "Act 5<" not in tile
+    assert f"/tiles/members/{PAT}/votes?topic=&amp;offset=20" in tile
+
+
+def test_next_page_holds_the_rest_and_offers_no_more(client, conn):
+    add_pat(conn)
+    add_votes(conn, 25)
+
+    rows = client.get(f"/tiles/members/{PAT}/votes", params={"offset": 20}).text
+
+    assert rows.count('class="vote"') == 5
+    assert "Act 5<" in rows
+    assert "Act 1<" in rows
+    assert "Act 6<" not in rows
+    assert "Show more votes" not in rows
+
+
+def test_exactly_twenty_votes_offers_no_more(client, conn):
+    add_pat(conn)
+    add_votes(conn, 20)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert tile.count('class="vote"') == 20
+    assert "Show more votes" not in tile
+
+
+def test_vote_rows_for_a_topic_hold_only_that_topic(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999, policy_area="Health")
+    add_bill(conn, 8888, policy_area="Energy")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999", title="A")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 8888", title="B")
+
+    rows = client.get(f"/tiles/members/{PAT}/votes", params={"topic": "Health"}).text
+
+    assert rows.count('class="vote"') == 1
+
+
+def test_more_votes_for_a_topic_keep_the_topic(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999, policy_area="Crime and Law Enforcement")
+    add_votes(conn, 21)
+
+    rows = client.get(
+        f"/tiles/members/{PAT}/votes", params={"topic": "Crime and Law Enforcement"}
+    ).text
+
+    assert "topic=Crime%20and%20Law%20Enforcement&amp;offset=20" in rows
+
+
+def test_an_empty_topic_means_all_topics(client, conn):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    rows = client.get(f"/tiles/members/{PAT}/votes", params={"topic": ""}).text
+
+    assert rows.count('class="vote"') == 1
+
+
+def test_vote_rows_refuse_a_negative_offset(client):
+    response = client.get(f"/tiles/members/{PAT}/votes", params={"offset": -1})
+
+    assert response.status_code == 422

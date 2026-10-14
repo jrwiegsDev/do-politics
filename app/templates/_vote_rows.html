@@ -1,0 +1,16 @@
+{% for vote in votes %}
+<li class="vote">
+  <div class="vote-title">{{ vote.bill.title if vote.bill else vote.title or vote.question }}</div>
+  <div class="vote-detail">{{ vote.voted_at | vote_date }} · {{ vote.question }} · {{ vote.result }}</div>
+  <div class="vote-position">Voted: <strong>{{ vote.position }}</strong></div>
+</li>
+{% else %}
+<li class="vote-none">No votes to show.</li>
+{% endfor %}
+{% if next_offset %}
+<li class="vote-more">
+  <button type="button"
+          hx-get="/tiles/members/{{ bioguide_id }}/votes?topic={{ (topic or '') | urlencode }}&amp;offset={{ next_offset }}"
+          hx-target="closest li" hx-swap="outerHTML">Show more votes</button>
+</li>
+{% endif %}

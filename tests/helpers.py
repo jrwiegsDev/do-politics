@@ -80,22 +80,24 @@ def add_vote(
     question="On Passage",
     chamber="house",
     title="Example Act",
+    issue="H R 9999",
+    session=2,
 ):
     """Store a made-up vote held at noon UTC on the given day of January 2026.
 
     positions maps a bioguide ID to how that member voted, such as
     {"T000001": "Yea"}. The vote's category is worked out from its question,
-    exactly as the loader does it.
+    and its bill from its issue, exactly as the loader does it.
     """
     vote = {
         "chamber": chamber,
         "congress": 119,
-        "session": 2,
+        "session": session,
         "roll_number": roll_number,
         "voted_at": datetime(2026, 1, day, 12, 0, tzinfo=UTC),
         "question": question,
         "vote_type": None,
-        "issue": "H R 9999",
+        "issue": issue,
         "title": title,
         "result": "Passed",
         "source_url": f"https://example.test/{chamber}/{roll_number}",
@@ -119,7 +121,7 @@ def summary(version_code, action_on, action_desc, text) -> dict:
     }
 
 
-def add_bill(conn, bill_number=9999, summaries=()) -> None:
+def add_bill(conn, bill_number=9999, summaries=(), policy_area="Energy") -> None:
     """Store a made-up House bill of the 119th Congress, sponsored by Pat Example.
 
     The default number is the bill the made-up votes name ('H R 9999').
@@ -129,7 +131,7 @@ def add_bill(conn, bill_number=9999, summaries=()) -> None:
         "bill_type": "hr",
         "bill_number": bill_number,
         "title": "Example Act",
-        "policy_area": "Energy",
+        "policy_area": policy_area,
         "sponsor_bioguide_id": "T000001",
         "introduced_on": date(2025, 1, 15),
         "latest_action_on": date(2025, 5, 9),

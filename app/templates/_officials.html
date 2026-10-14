@@ -1,14 +1,20 @@
 <h2>{{ district.name }}</h2>
+{# Choosing a name asks the server for that member's tile and puts it in the
+   member slot. The officials tile itself stays where it is. #}
 <ul class="officials">
   {% for senator in senators %}
   <li>
-    <div class="official-name">{{ senator.name }}</div>
+    <button type="button" class="official-name"
+            hx-get="/tiles/members/{{ senator.bioguide_id }}"
+            hx-target="#member-tile" hx-swap="innerHTML">{{ senator.name }}</button>
     <div class="official-role">Senator ({{ senator.party }}, {{ senator.state }})</div>
   </li>
   {% endfor %}
   <li>
     {% if representative %}
-    <div class="official-name">{{ representative.name }}</div>
+    <button type="button" class="official-name"
+            hx-get="/tiles/members/{{ representative.bioguide_id }}"
+            hx-target="#member-tile" hx-swap="innerHTML">{{ representative.name }}</button>
     <div class="official-role">Representative ({{ representative.party }}, {{ representative.state }})</div>
     {% else %}
     <div class="vacant">This House seat is currently vacant.</div>
