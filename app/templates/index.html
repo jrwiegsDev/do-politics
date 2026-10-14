@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="intro">
+  <p>
+    Politics does all of us, whether any of us "do politics" or not. Don't
+    believe me? Enter your address to look up how your elected officials have
+    voted on legislation that has most definitely affected you in some way.
+  </p>
+</section>
+
+{# A tile slot must hold nothing at all, not even a space, until it is
+   filled: the stylesheet lays the page out by which slots are empty. #}
+<main class="tiles">
+  <section class="tile" id="address-tile">
+    {# method and action are the fallback if the script does not load. The
+       default method is GET, which would put the address in the URL. #}
+    <form method="post" action="/tiles/officials"
+          hx-post="/tiles/officials" hx-target="#officials-tile" hx-swap="innerHTML">
+      <label for="address">Street address</label>
+      <input id="address" name="address" type="text" required
+             minlength="5" maxlength="200" autocomplete="street-address"
+             placeholder="401 S 2nd St, Springfield, IL 62701">
+      <button type="submit">Find my officials</button>
+    </form>
+  </section>
+  <section class="tile" id="officials-tile"></section>
+  <section class="tile" id="member-tile"></section>
+  <section class="tile" id="bill-tile"></section>
+</main>
+{% endblock %}

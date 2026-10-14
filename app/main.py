@@ -1,21 +1,33 @@
 """The DoPolitics API."""
 
-from collections.abc import Iterator
 from datetime import date
+from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
-import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.bills import find_bill
+
+# get_conn is imported so that `from app.main import get_conn` keeps working.
+from app.deps import Conn, get_conn  # noqa: F401
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.members import find_member
+from app.pages import router as pages_router
 from app.votes import ALL_CATEGORIES, FINAL_CATEGORIES, find_recent_votes
-from ingest.db import connect
 
 app = FastAPI(title="DoPolitics")
+
+# The stylesheet and the HTMX script are served from our own folder, so a
+# visitor's browser never has to ask another site for anything.
+app.mount(
+    "/static",
+    StaticFiles(directory=FilePath(__file__).parent / "static"),
+    name="static",
+)
+app.include_router(pages_router)
 
 
 class LookupRequest(BaseModel):
@@ -55,16 +67,6 @@ class BillOut(BaseModel):
 
 
 BillType = Literal["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
-
-
-def get_conn() -> Iterator[psycopg.Connection]:
-    """Open a database connection for one request and close it afterwards."""
-    with connect() as conn:
-        yield conn
-
-
-# An endpoint asks for a database connection by giving a parameter this type.
-Conn = Annotated[psycopg.Connection, Depends(get_conn)]
 
 
 @app.get("/health")

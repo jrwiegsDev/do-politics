@@ -6,7 +6,7 @@ People say "I don't do politics." Politics does all of us.
 
 DoPolitics takes a street address and returns every federal official who represents it: two U.S. senators and one U.S. representative. For each official it shows recent votes, each with the official summary of the bill it concerns, and every way to contact them. There's no signup, no account and no donation ask.
 
-**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has ever served in Congress, and a fourth loads every roll call vote of the current Congress from the House Clerk and the Senate, with each member's position. A second endpoint returns a member's most recent votes. A fifth loader pulls each bill those votes name from the Congress.gov API, with its official summaries, and a third endpoint returns a bill and its summaries. No web app yet.
+**Status:** early development. The local database (Postgres 18 + PostGIS in Docker) is running, and the district lookup works against all 441 congressional districts (435 voting seats, plus the delegates for DC and the five territories), which a repeatable Python loader pulls from the Census. The schema is managed with Alembic migrations, and every ingestion run is recorded. The lookup is a tested Python function, and GitHub Actions runs the tests against a database built from scratch on every push. A second loader pulls the sitting members of Congress and their DC office contacts from the congress-legislators project. A FastAPI endpoint ties these together: it takes a street address, geocodes it, and returns the district, both senators and the representative, or says the House seat is vacant. A third loader keeps a record of everyone who has ever served in Congress, and a fourth loads every roll call vote of the current Congress from the House Clerk and the Senate, with each member's position. A second endpoint returns a member's most recent votes. A fifth loader pulls each bill those votes name from the Congress.gov API, with its official summaries, and a third endpoint returns a bill and its summaries. The web app has its first page: enter an address and the officials for it appear. Their votes and the bills come next.
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -44,6 +44,7 @@ Generated plain-language summaries may come later. If they do, each will be labe
 | Layer | Choice |
 |---|---|
 | API | Python, FastAPI, Uvicorn, httpx2 |
+| Web app | Jinja2 templates served by the same FastAPI app, HTMX, a hand-written stylesheet |
 | Database | PostgreSQL + PostGIS |
 | Cache | Redis |
 | Migrations | Alembic, written as plain SQL |
@@ -121,7 +122,7 @@ Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or an
    uv run --env-file .env uvicorn app.main:app --reload
    ```
 
-   Interactive documentation is then at `http://127.0.0.1:8000/docs`.
+   The web app is then at `http://127.0.0.1:8000/` and the API's interactive documentation at `http://127.0.0.1:8000/docs`.
 
 The database listens on `127.0.0.1:5433` by default, so it doesn't collide with a Postgres already running on 5432. Change `POSTGRES_PORT` in `.env` to use another port.
 
@@ -401,13 +402,28 @@ The summary's original HTML is never sent, and three things keep it that way: th
 | Bill is not stored | `404` |
 | Unknown bill type, or a Congress or number below 1 | `422` |
 
+## Web app
+
+The pages are built on the server by the same FastAPI app that serves the API, so there is one service to run and deploy. `app/pages.py` holds the routes, `app/templates/` the [Jinja2](https://jinja.palletsprojects.com/) templates, and `app/static/` the stylesheet and a pinned copy of [HTMX](https://htmx.org/) 4.0.0.
+
+| Method | Path | Returns |
+|---|---|---|
+| `GET` | `/` | The whole page: a greeting and the address form |
+| `POST` | `/tiles/officials` | The officials tile for an address, as a piece of HTML |
+
+The page is made of tiles. Submitting the address does not load a new page: HTMX posts the form, the server answers with the HTML for one tile, and HTMX puts it into the page. The page routes call the same functions as the JSON endpoints (`geocode`, then `lookup`), so the API and the page cannot disagree. When an address can't be resolved, the tile holds a plain message and the response carries the same status code `/lookup` would give.
+
+The privacy rules hold here too. The address travels in the body of a `POST` and is never sent back in the HTML or written to a log. The form also declares `method="post"`, because a form sends with `GET` by default and that would put the address in the URL if the script ever failed to load. The stylesheet and the script are served from this app, so opening the page asks no other site for anything.
+
+Jinja2 escapes every value it prints, so text from a source, such as a name or a bill summary, is shown as text and can never run as HTML.
+
 ## Tests
 
 ```
 uv run --env-file .env pytest
 ```
 
-The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials and members tests use made-up members rather than the live files, so they don't fail when a real member leaves office. The votes tests use made-up roll calls in each chamber's real layout, and the bills tests a made-up bill in the layout Congress.gov sends, so none needs an API key. The geocoder and API tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
+The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials and members tests use made-up members rather than the live files, so they don't fail when a real member leaves office. The votes tests use made-up roll calls in each chamber's real layout, and the bills tests a made-up bill in the layout Congress.gov sends, so none needs an API key. The geocoder, API and page tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
 
 GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
 

@@ -1,0 +1,185 @@
+/* DoPolitics stylesheet. Hand-written, no framework and no build step. */
+
+:root {
+  --ink: #1b1f24;
+  --muted: #5b6470;
+  --paper: #f6f4ef;
+  --tile: #ffffff;
+  --line: #d9d5cb;
+  --accent: #1d4ed8;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+/* Before a lookup the page sits low, with the address tile near the middle.
+   Once the officials tile holds anything, the padding shrinks and everything
+   moves up. */
+.page {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 18vh 1rem 2rem;
+  transition: padding-top 0.4s ease;
+}
+
+.page:has(#officials-tile:not(:empty)) {
+  padding-top: 2rem;
+}
+
+.site-header h1 {
+  margin: 0 0 1rem;
+  text-align: center;
+  font-size: 2rem;
+}
+
+.intro {
+  max-width: 40rem;
+  margin: 0 auto 1.5rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.site-footer {
+  margin-top: 2rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+/* The tiles. One column to start with. When the member tile holds anything,
+   the officials tile and the member tile share a row, and the bill tile runs
+   the full width underneath. */
+.tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "address"
+    "officials"
+    "member"
+    "bill";
+  gap: 1rem;
+  max-width: 40rem;
+  margin: 0 auto;
+}
+
+#address-tile {
+  grid-area: address;
+}
+
+#officials-tile {
+  grid-area: officials;
+}
+
+#member-tile {
+  grid-area: member;
+}
+
+#bill-tile {
+  grid-area: bill;
+}
+
+@media (min-width: 50rem) {
+  .tiles:has(#member-tile:not(:empty)) {
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    grid-template-areas:
+      "address   address"
+      "officials member"
+      "bill      bill";
+  }
+}
+
+.tile {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+/* An empty slot takes no room and shows no border. */
+.tile:empty {
+  display: none;
+}
+
+.tile h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+}
+
+/* The address form. */
+#address-tile label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-weight: 600;
+}
+
+#address-tile form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+button {
+  padding: 0.625rem 1rem;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+input[type="text"]:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The officials tile. */
+.officials {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.officials li {
+  padding: 0.625rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.officials li:first-child {
+  border-top: 0;
+}
+
+.official-name {
+  font-weight: 600;
+}
+
+.official-role,
+.vacant {
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.message {
+  margin: 0;
+}
