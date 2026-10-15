@@ -44,7 +44,15 @@
                placeholder="62701">
       </div>
       <p class="hint">Enter a ZIP code, or a city and state, or all three.</p>
-      <button type="submit">Find my officials</button>
+      {# A reset button is built into HTML: it puts every field in the form
+         back to how the page loaded it, which here is empty. HTMX also asks
+         the server for empty tiles. hx-swap="none" puts nothing in a target;
+         the answer's out-of-band tiles are swapped in by their ids. The
+         request carries no address. #}
+      <div class="form-actions">
+        <button type="submit">Find my officials</button>
+        <button type="reset" hx-get="/tiles/clear" hx-swap="none">Clear</button>
+      </div>
     </form>
   </section>
   <section class="tile" id="officials-tile"></section>

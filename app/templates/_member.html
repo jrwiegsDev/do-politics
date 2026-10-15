@@ -53,3 +53,8 @@
 <ul class="votes" id="vote-list">
   {% include "_vote_rows.html" %}
 </ul>
+
+{# Out of band: HTMX also empties the bill tile, so a bill chosen from the
+   last member's votes does not stay open under a different member. It must
+   hold nothing, for the stylesheet's :empty rule. #}
+<section id="bill-tile" hx-swap-oob="innerHTML"></section>

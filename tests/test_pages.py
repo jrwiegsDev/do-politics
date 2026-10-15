@@ -14,8 +14,10 @@ from helpers import (
     add_members,
     add_vote,
     official,
+    summary,
 )
 
+from app.bills import bill_label
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
 
@@ -212,6 +214,64 @@ def test_address_is_never_sent_back_or_logged(client, conn, monkeypatch, caplog)
     assert STREET not in caplog.text
 
 
+# What a response carries to empty a tile out of band.
+CLEARS_OFFICIALS = '<section id="officials-tile" hx-swap-oob="innerHTML"></section>'
+CLEARS_MEMBER = '<section id="member-tile" hx-swap-oob="innerHTML"></section>'
+CLEARS_BILL = '<section id="bill-tile" hx-swap-oob="innerHTML"></section>'
+
+
+def test_clear_button_empties_the_fields_and_asks_for_empty_tiles(client):
+    page = client.get("/").text
+
+    assert (
+        '<button type="reset" hx-get="/tiles/clear" hx-swap="none">Clear</button>'
+        in page
+    )
+
+
+def test_clear_returns_every_tile_below_the_address_empty_and_nothing_else(client):
+    response = client.get("/tiles/clear")
+
+    assert response.status_code == 200
+    assert CLEARS_OFFICIALS in response.text
+    assert CLEARS_MEMBER in response.text
+    assert CLEARS_BILL in response.text
+    rest = response.text
+    for section in (CLEARS_OFFICIALS, CLEARS_MEMBER, CLEARS_BILL):
+        rest = rest.replace(section, "")
+    assert rest.strip() == ""
+
+
+def test_officials_tile_empties_the_member_and_bill_tiles(client, conn, monkeypatch):
+    add(conn, seated(SENATOR_A))
+    geocode_to(monkeypatch, CAPITOL)
+
+    tile = client.post("/tiles/officials", data=ADDRESS).text
+
+    assert CLEARS_MEMBER in tile
+    assert CLEARS_BILL in tile
+
+
+def test_every_message_in_the_officials_tile_empties_the_tiles_below(
+    client, monkeypatch
+):
+    def unavailable(address):
+        raise GeocoderUnavailable("ConnectTimeout")
+
+    responses = [client.post("/tiles/officials", data={})]
+    geocode_to(monkeypatch, None)
+    responses.append(client.post("/tiles/officials", data=ADDRESS))
+    geocode_to(monkeypatch, MID_ATLANTIC)
+    responses.append(client.post("/tiles/officials", data=ADDRESS))
+    monkeypatch.setattr("app.pages.geocode", unavailable)
+    responses.append(client.post("/tiles/officials", data=ADDRESS))
+
+    assert [r.status_code for r in responses] == [422, 404, 404, 503]
+    for response in responses:
+        assert CLEARS_MEMBER in response.text
+        assert CLEARS_BILL in response.text
+
+
 # The member tile. Pat Example is in the made-up members, so votes can be
 # stored for that ID, and here also holds a House seat.
 PAT = "T000001"
@@ -310,6 +370,8 @@ def test_member_tile_for_an_id_nobody_holds_a_seat_under_is_404(client, conn):
 
     assert response.status_code == 404
     assert "Nobody holding a seat in Congress has that ID." in response.text
+    # The message goes into the member tile, so it must not empty that tile.
+    assert "hx-swap-oob" not in response.text
 
 
 def test_member_tile_refuses_a_malformed_id(client):
@@ -406,3 +468,148 @@ def test_vote_rows_refuse_a_negative_offset(client):
     response = client.get(f"/tiles/members/{PAT}/votes", params={"offset": -1})
 
     assert response.status_code == 422
+
+
+# The bill tile. add_bill stores H.R. 9999 of the 119th Congress, sponsored
+# by Pat Example, which is the bill the made-up votes name by default.
+BILL = "/tiles/bills/119/hr/9999"
+
+
+def test_a_vote_on_a_stored_bill_opens_the_bill_tile(client, conn):
+    add_pat(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert f'hx-get="{BILL}"' in tile
+    assert 'hx-target="#bill-tile"' in tile
+
+
+def test_a_vote_whose_bill_is_not_stored_opens_nothing(client, conn):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 7777", title="New Act")
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert "New Act" in tile
+    assert "/tiles/bills/" not in tile
+
+
+def test_opening_a_member_empties_the_bill_tile(client, conn):
+    add_pat(conn)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert CLEARS_BILL in tile
+    assert CLEARS_MEMBER not in tile
+
+
+def test_bill_tile_shows_the_bill_its_sponsor_and_where_it_stands(client, conn):
+    add_members(conn)
+    add_bill(conn)
+
+    response = client.get(BILL)
+
+    assert response.status_code == 200
+    assert "<html" not in response.text
+    assert "H.R. 9999" in response.text
+    assert "Example Act" in response.text
+    assert "Pat Example" in response.text
+    assert "Jan 15, 2025" in response.text
+    assert "May 9, 2025" in response.text
+    assert "Became Public Law." in response.text
+    assert "Energy" in response.text
+    assert 'href="https://example.test/bill/9999"' in response.text
+
+
+def test_bill_tile_shows_summaries_newest_stage_first_with_only_the_newest_open(
+    client, conn
+):
+    add_members(conn)
+    add_bill(
+        conn,
+        summaries=[
+            summary("00", date(2025, 1, 15), "Introduced in House", "First words."),
+            summary("49", date(2025, 5, 9), "Public Law", "Last words."),
+        ],
+    )
+
+    tile = client.get(BILL).text
+
+    assert tile.index("Last words.") < tile.index("First words.")
+    assert "Introduced in House, Jan 15, 2025" in tile
+    assert tile.count('<details class="summary" open>') == 1
+    assert tile.count('<details class="summary">') == 1
+
+
+def test_bill_tile_says_when_there_is_no_official_summary(client, conn):
+    add_members(conn)
+    add_bill(conn)
+
+    tile = client.get(BILL).text
+
+    assert "No official summary has been published for this bill yet." in tile
+    assert "<details" not in tile
+
+
+def test_a_summary_is_shown_as_text_and_never_as_html(client, conn):
+    add_members(conn)
+    text = "<script>alert(1)</script>"
+    add_bill(conn, summaries=[summary("00", date(2025, 1, 15), "Introduced", text)])
+
+    tile = client.get(BILL).text
+
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in tile
+    assert "<script>" not in tile
+
+
+def test_bill_tile_never_sends_a_summary_s_original_html(client, conn):
+    add_members(conn)
+    text = "Plain words."
+    add_bill(conn, summaries=[summary("00", date(2025, 1, 15), "Introduced", text)])
+
+    tile = client.get(BILL).text
+
+    assert "Plain words." in tile
+    # The made-up original HTML wraps the text in <p> and </p>.
+    assert "<p>Plain words.</p>" not in tile
+
+
+def test_bill_tile_never_links_to_something_that_is_not_a_web_address(client, conn):
+    add_members(conn)
+    add_bill(conn)
+    conn.execute("UPDATE bills SET source_url = 'javascript:alert(1)'")
+
+    tile = client.get(BILL).text
+
+    assert "javascript:" not in tile
+
+
+def test_bill_tile_for_a_bill_not_stored_is_404(client, conn):
+    response = client.get("/tiles/bills/119/hr/1")
+
+    assert response.status_code == 404
+    assert "That bill is not in our records yet." in response.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/tiles/bills/119/xyz/1", "/tiles/bills/0/hr/1", "/tiles/bills/119/hr/0"],
+)
+def test_bill_tile_refuses_a_malformed_bill(client, path):
+    assert client.get(path).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("bill_type", "bill_number", "label"),
+    [
+        ("hr", 1, "H.R. 1"),
+        ("s", 5, "S. 5"),
+        ("hjres", 12, "H.J.Res. 12"),
+        ("sconres", 7, "S.Con.Res. 7"),
+        ("sres", 300, "S.Res. 300"),
+    ],
+)
+def test_a_bill_is_named_the_way_congress_writes_it(bill_type, bill_number, label):
+    assert bill_label(bill_type, bill_number) == label

@@ -412,8 +412,10 @@ The pages are built on the server by the same FastAPI app that serves the API, s
 |---|---|---|
 | `GET` | `/` | The whole page: a greeting and the address form |
 | `POST` | `/tiles/officials` | The officials tile for an address, as a piece of HTML |
+| `GET` | `/tiles/clear` | Empty officials, member and bill tiles, for the Clear button |
 | `GET` | `/tiles/members/{bioguide_id}` | The member tile: contact details, attendance, a topic filter and the member's recent votes |
 | `GET` | `/tiles/members/{bioguide_id}/votes?topic=&offset=` | More vote rows, for "show more" or a chosen topic |
+| `GET` | `/tiles/bills/{congress}/{bill_type}/{bill_number}` | The bill tile: sponsor, dates, latest action, the official summaries and a link to Congress.gov |
 
 The page is made of tiles. Submitting the address does not load a new page: HTMX posts the form, the server answers with the HTML for one tile, and HTMX puts it into the page. The page routes call the same functions as the JSON endpoints (`geocode`, then `lookup`), so the API and the page cannot disagree. When an address can't be resolved, the tile holds a plain message and the response carries the same status code `/lookup` would give.
 
@@ -422,6 +424,10 @@ The form has separate fields for street, city, state and ZIP code. Each one name
 The privacy rules hold here too. The address travels in the body of a `POST` and is never sent back in the HTML or written to a log. The form also declares `method="post"`, because a form sends with `GET` by default and that would put the address in the URL if the script ever failed to load. The stylesheet and the script are served from this app, so opening the page asks no other site for anything.
 
 Choosing an official opens the member tile beside the officials tile. It shows how to reach them, their attendance for each session, and their recent final votes, twenty at a time, with a dropdown of the policy areas their votes touched. Attendance counts every roll call that listed the member, and every position except `Not Voting` counts as taking part. The chosen topic and how far down the list a visitor has read travel with each request, so the server keeps nothing between one request and the next. A vote's date is the day in Washington, where Congress sits.
+
+Choosing a vote on a stored bill opens the bill tile across the full width underneath. It shows the bill as Congress writes it (`H.R. 1`), its sponsor, when it was introduced, its topic and its latest action, then the official CRS summaries, newest stage first. The newest summary is open and older stages fold away under their stage and date, using the browser's own `<details>` element. A bill with no official summary says so, and the tile always names the Congressional Research Service as the summaries' author and links to the bill on Congress.gov. A nomination, or a bill not loaded yet, is shown as plain text and opens nothing.
+
+A tile never outlives what it was opened for. A new member tile empties the bill tile, and every answer for the officials tile, including an error message, empties the member and bill tiles. The server does this by adding empty copies of those tiles to its answer, marked `hx-swap-oob`, which HTMX swaps into the page alongside the tile it asked for. The Clear button starts over. It is an HTML `type="reset"` button, so the browser itself empties the four address fields, and HTMX also asks `GET /tiles/clear` for empty tiles, so the page returns to how it first loaded. That request carries no address.
 
 After a lookup the page fits one screen: the tiles have fixed heights and scroll inside themselves, set entirely in the stylesheet.
 

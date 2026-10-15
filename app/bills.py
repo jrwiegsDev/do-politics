@@ -1,7 +1,23 @@
 """Find a bill and its official summaries."""
 
+from typing import Literal
+
 import psycopg
 from psycopg.rows import dict_row
+
+BillType = Literal["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
+
+# How Congress writes each bill type in front of the number, as in 'H.R. 1'.
+BILL_LABELS = {
+    "hr": "H.R.",
+    "s": "S.",
+    "hjres": "H.J.Res.",
+    "sjres": "S.J.Res.",
+    "hconres": "H.Con.Res.",
+    "sconres": "S.Con.Res.",
+    "hres": "H.Res.",
+    "sres": "S.Res.",
+}
 
 FIND_BILL_SQL = """
 SELECT b.id, b.congress, b.bill_type, b.bill_number, b.title, b.policy_area,
@@ -20,6 +36,11 @@ FROM bill_summaries
 WHERE bill_id = %(bill_id)s
 ORDER BY action_on DESC, version_code DESC;
 """
+
+
+def bill_label(bill_type: str, bill_number: int) -> str:
+    """Return a bill's name as Congress writes it, such as 'H.R. 1' or 'S.J.Res. 12'."""
+    return f"{BILL_LABELS[bill_type]} {bill_number}"
 
 
 def find_bill(

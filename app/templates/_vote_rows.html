@@ -1,6 +1,14 @@
 {% for vote in votes %}
 <li class="vote">
-  <div class="vote-title">{{ vote.bill.title if vote.bill else vote.title or vote.question }}</div>
+  {# A vote on a stored bill opens the bill tile under the other tiles. A
+     nomination, or a bill not loaded yet, is plain text. #}
+  {% if vote.bill %}
+  <button type="button" class="vote-title"
+          hx-get="/tiles/bills/{{ vote.bill.congress }}/{{ vote.bill.bill_type }}/{{ vote.bill.bill_number }}"
+          hx-target="#bill-tile" hx-swap="innerHTML">{{ vote.bill.title }}</button>
+  {% else %}
+  <div class="vote-title">{{ vote.title or vote.question }}</div>
+  {% endif %}
   <div class="vote-detail">{{ vote.voted_at | vote_date }} · {{ vote.question }} · {{ vote.result }}</div>
   <div class="vote-position">Voted: <strong>{{ vote.position }}</strong></div>
 </li>

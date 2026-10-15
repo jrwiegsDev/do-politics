@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.address import Address
-from app.bills import find_bill
+from app.bills import BillType, find_bill
 
 # get_conn is imported so that `from app.main import get_conn` keeps working.
 from app.deps import Conn, get_conn  # noqa: F401
@@ -59,9 +59,6 @@ class BillOut(BaseModel):
     latest_action: str | None
     source_url: str
     summaries: list[SummaryOut]
-
-
-BillType = Literal["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
 
 
 @app.get("/health")
