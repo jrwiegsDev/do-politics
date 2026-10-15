@@ -1,6 +1,6 @@
 """The pages people see. Each route returns HTML built from a template."""
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path as FilePath
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.address import Address
+from app.bills import BillType, bill_label, find_bill
 from app.deps import Conn
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
@@ -29,14 +30,21 @@ router = APIRouter(default_response_class=HTMLResponse, include_in_schema=False)
 templates = Jinja2Templates(directory=FilePath(__file__).parent / "templates")
 
 
-def vote_date(moment: datetime) -> str:
-    """Return the day a vote was held, in Washington's time, such as 'Sep 16, 2026'."""
-    day = moment.astimezone(EASTERN)
+def long_date(day: date) -> str:
+    """Return a day written out, such as 'Sep 16, 2026'."""
     return f"{day:%b} {day.day}, {day.year}"
 
 
-# A template uses this as {{ vote.voted_at | vote_date }}.
+def vote_date(moment: datetime) -> str:
+    """Return the day a vote was held, in Washington's time, such as 'Sep 16, 2026'."""
+    return long_date(moment.astimezone(EASTERN))
+
+
+# A template uses these as {{ vote.voted_at | vote_date }}, {{ bill.introduced_on
+# | long_date }} and {{ bill.bill_type | bill_label(bill.bill_number) }}.
+templates.env.filters["long_date"] = long_date
 templates.env.filters["vote_date"] = vote_date
+templates.env.filters["bill_label"] = bill_label
 
 
 def vote_page(conn: Conn, bioguide_id: str, topic: str | None, offset: int) -> dict:
@@ -56,10 +64,17 @@ def vote_page(conn: Conn, bioguide_id: str, topic: str | None, offset: int) -> d
     }
 
 
-def message(request: Request, text: str, status_code: int) -> HTMLResponse:
-    """Return a one-line message to show in place of a tile."""
+def message(
+    request: Request, text: str, status_code: int, clear_tiles: bool = False
+) -> HTMLResponse:
+    """Return a one-line message to show in place of a tile.
+
+    With clear_tiles, the member and bill tiles are emptied as well. The
+    officials tile asks for that, because a new address makes them stale.
+    """
+    context = {"text": text, "clear_tiles": clear_tiles}
     return templates.TemplateResponse(
-        request, "_message.html", {"text": text}, status_code=status_code
+        request, "_message.html", context, status_code=status_code
     )
 
 
@@ -67,6 +82,12 @@ def message(request: Request, text: str, status_code: int) -> HTMLResponse:
 def index(request: Request) -> HTMLResponse:
     """Return the whole page: the greeting and the address tile."""
     return templates.TemplateResponse(request, "index.html")
+
+
+@router.get("/tiles/clear")
+def clear_tiles(request: Request) -> HTMLResponse:
+    """Return every tile below the address emptied, for the Clear button."""
+    return templates.TemplateResponse(request, "_clear_all.html")
 
 
 @router.post("/tiles/officials")
@@ -87,13 +108,17 @@ def officials_tile(
             request,
             "Enter a street address with a ZIP code, or with a city and state.",
             422,
+            clear_tiles=True,
         )
 
     try:
         point = geocode(address)
     except GeocoderUnavailable:
         return message(
-            request, "The address service is unavailable. Try again shortly.", 503
+            request,
+            "The address service is unavailable. Try again shortly.",
+            503,
+            clear_tiles=True,
         )
 
     if point is None:
@@ -101,12 +126,18 @@ def officials_tile(
             request,
             "Sorry! We couldn't locate that address. Try typing it in again.",
             404,
+            clear_tiles=True,
         )
 
     longitude, latitude = point
     result = lookup(conn, longitude, latitude)
     if result is None:
-        return message(request, "That address is not in a congressional district.", 404)
+        return message(
+            request,
+            "That address is not in a congressional district.",
+            404,
+            clear_tiles=True,
+        )
 
     return templates.TemplateResponse(request, "_officials.html", result)
 
@@ -145,3 +176,19 @@ def vote_rows(
     # The dropdown's "All topics" choice sends an empty topic.
     context = vote_page(conn, bioguide_id, topic or None, offset)
     return templates.TemplateResponse(request, "_vote_rows.html", context)
+
+
+@router.get("/tiles/bills/{congress}/{bill_type}/{bill_number}")
+def bill_tile(
+    request: Request,
+    conn: Conn,
+    congress: Annotated[int, Path(ge=1)],
+    bill_type: BillType,
+    bill_number: Annotated[int, Path(ge=1)],
+) -> HTMLResponse:
+    """Return the bill tile: the bill, where it stands, and its official summaries."""
+    bill = find_bill(conn, congress, bill_type, bill_number)
+    if bill is None:
+        return message(request, "That bill is not in our records yet.", 404)
+
+    return templates.TemplateResponse(request, "_bill.html", {"bill": bill})

@@ -1,0 +1,5 @@
+{# Out of band: HTMX also empties the member and bill tiles, so tiles opened
+   for an earlier address do not stay open under a new one. Each must hold
+   nothing, for the stylesheet's :empty rule. #}
+<section id="member-tile" hx-swap-oob="innerHTML"></section>
+<section id="bill-tile" hx-swap-oob="innerHTML"></section>

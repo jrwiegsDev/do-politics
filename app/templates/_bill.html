@@ -1,0 +1,37 @@
+<p class="bill-label">{{ bill.bill_type | bill_label(bill.bill_number) }}</p>
+<h2>{{ bill.title }}</h2>
+
+<dl class="bill-facts">
+  <dt>Sponsor</dt>
+  <dd>{{ bill.sponsor_name }}</dd>
+  <dt>Introduced</dt>
+  <dd>{{ bill.introduced_on | long_date }}</dd>
+  {% if bill.policy_area %}
+  <dt>Topic</dt>
+  <dd>{{ bill.policy_area }}</dd>
+  {% endif %}
+  {% if bill.latest_action and bill.latest_action_on %}
+  <dt>Latest action</dt>
+  <dd>{{ bill.latest_action_on | long_date }}: {{ bill.latest_action }}</dd>
+  {% endif %}
+</dl>
+
+<h3>Official summaries</h3>
+{# Newest stage first. Only the newest is open; the others fold away and
+   open with a click, with no script involved. #}
+{% for summary in bill.summaries %}
+<details class="summary"{% if loop.first %} open{% endif %}>
+  <summary>{{ summary.action_desc }}, {{ summary.action_on | long_date }}</summary>
+  <p class="summary-text">{{ summary.summary_text }}</p>
+</details>
+{% else %}
+<p class="vote-none">No official summary has been published for this bill yet.</p>
+{% endfor %}
+
+<p class="summary-source">
+  Summaries are written by the Congressional Research Service, part of the
+  Library of Congress.
+  {% if bill.source_url.startswith("https://") %}
+  <a href="{{ bill.source_url }}" rel="noopener">Read the bill on Congress.gov</a>
+  {% endif %}
+</p>
