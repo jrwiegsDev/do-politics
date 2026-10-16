@@ -33,3 +33,20 @@ jobs:
         run: uv sync --locked
       - name: Run tests
         run: uv run --env-file .env pytest -v --cov
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Create local settings
+        run: cp .env.example .env
+      - name: Start the database
+        run: docker compose up -d --wait
+      - name: Install dependencies
+        run: uv sync --locked
+      # --with-deps also installs the system libraries Chromium needs on Linux.
+      - name: Install the browser
+        run: uv run playwright install --with-deps chromium
+      - name: Run browser tests
+        run: uv run --env-file .env pytest -m "e2e and not census" -v

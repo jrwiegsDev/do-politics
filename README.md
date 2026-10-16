@@ -51,7 +51,7 @@ Generated plain-language summaries may come later. If they do, each will be labe
 | Ingestion | Python, psycopg, pyshp, Beautiful Soup |
 | Dependencies | uv |
 | Local dev | Docker Compose (Postgres 18 + PostGIS 3.6) |
-| Testing | pytest, Playwright end-to-end |
+| Testing | pytest, pytest-cov, Playwright (pytest-playwright) end-to-end in Chromium |
 | CI | GitHub Actions |
 | Hosting | Render |
 
@@ -477,6 +477,36 @@ uv run --env-file .env pytest --cov
 ```
 
 This uses [pytest-cov](https://pytest-cov.readthedocs.io/) and prints, for each file in `app/` and `ingest/`, the share of lines the tests ran and the line numbers they missed. CI runs it this way and fails if the total drops below the floor set in `pyproject.toml`. The floor sits just under the measured figure, so coverage cannot slide unnoticed; it is not a target. What is left untested on purpose is the downloading itself and the command-line entry points of the districts, officials, members and bills loaders. The votes loader's entry point is tested, because it enforces rules about which arguments go together.
+
+### Browser tests
+
+The tests above call the app's routes directly and read the HTML they return. The browser tests in `tests/e2e/` go one step further: [Playwright](https://playwright.dev/python/), through [pytest-playwright](https://github.com/microsoft/playwright-pytest), drives a real Chromium through the page the way a visitor does. It types an address into the four fields, clicks the buttons, and checks what appears in each tile. They are the only tests that catch a fault between the server and the screen, such as an HTMX attribute aimed at the wrong tile.
+
+Chromium is downloaded once per machine (about 550 MB):
+
+```
+uv run playwright install chromium
+```
+
+A plain `pytest` skips the browser tests, so the rest stay fast. Run them by choosing their marker:
+
+```
+uv run --env-file .env pytest -m "e2e and not census"
+```
+
+`tests/e2e/conftest.py` starts the app in a background thread on a free port, against the same throwaway test database, and seats made-up Illinois officials with a photo, a vote and a bill. The app runs in the test's own process, so the Census call is replaced exactly as it is in the other tests. Locators find elements by their label or role and name, as a visitor or a screen reader does, not by CSS class, and every check waits for the page to catch up instead of sleeping for a fixed time.
+
+The tests cover finding an address, an address the Census cannot match, that the address never appears in any URL the browser requests, opening a member's votes and then a bill, a new member closing a stale bill, and the Clear button.
+
+One test calls the real Census Geocoder with the Illinois State Capitol's address. It needs the internet, so it runs only when asked and not in CI:
+
+```
+uv run --env-file .env pytest -m census
+```
+
+To watch a test, add `--headed --slowmo 500`. To step through one line at a time with the Playwright Inspector, put `PWDEBUG=1` before the command. To record a trace and replay it afterwards, add `--tracing on`, then open it with `uv run playwright show-trace test-results/*/trace.zip`. Traces are written to `test-results/`, which git ignores.
+
+CI runs the browser tests as their own job, `e2e`, next to the lint and test jobs.
 
 ## Code checks
 
