@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime
 from ingest.bills import save as save_bill
 from ingest.members import UPSERT_SQL as UPSERT_MEMBER_SQL
 from ingest.officials import UPSERT_SQL
+from ingest.photos import UPSERT_SQL as UPSERT_PHOTO_SQL
+from ingest.photos import to_row as to_photo_row
 from ingest.votes import save
 
 
@@ -140,6 +142,19 @@ def add_bill(conn, bill_number=9999, summaries=(), policy_area="Energy") -> None
         "source_updated_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
     save_bill(conn, bill, list(summaries))
+
+
+# The smallest thing the loader accepts as a JPEG: its three opening bytes.
+JPEG = b"\xff\xd8\xff" + b"made-up photo"
+
+
+def add_photo(conn, bioguide_id, image=JPEG, attribution=None) -> None:
+    """Store a made-up photo. The member must already be in the members table."""
+    source = "congress.gov" if attribution else "unitedstates"
+    url = f"https://example.test/{bioguide_id}.jpg"
+    conn.execute(
+        UPSERT_PHOTO_SQL, to_photo_row(bioguide_id, image, source, url, attribution)
+    )
 
 
 def last_run(conn) -> dict:

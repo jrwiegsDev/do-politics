@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,6 +17,7 @@ from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.members import find_member
 from app.pages import router as pages_router
+from app.photos import etag_for, etag_matches, find_photo
 from app.votes import ALL_CATEGORIES, FINAL_CATEGORIES, find_recent_votes
 
 app = FastAPI(title="DoPolitics")
@@ -119,6 +120,37 @@ def member_votes(
         "member": member,
         "votes": find_recent_votes(conn, bioguide_id, limit, categories),
     }
+
+
+# How long a browser may reuse a photo before asking again: a day. Asking
+# again costs little, because an unchanged photo is answered with 304.
+PHOTO_MAX_AGE = 86400
+
+
+@app.get("/photos/{bioguide_id}.jpg", response_class=Response)
+def photo(
+    conn: Conn,
+    bioguide_id: Annotated[str, Path(pattern=r"^[A-Z]\d{6}$")],
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Return a member's photo, or 304 Not Modified when the browser already has it.
+
+    The ETag is the photo's SHA-256, so it changes exactly when the image does.
+    """
+    found = find_photo(conn, bioguide_id)
+    if found is None:
+        raise HTTPException(
+            status_code=404, detail="No photo is stored for that member."
+        )
+
+    image, sha256 = found
+    headers = {
+        "ETag": etag_for(sha256),
+        "Cache-Control": f"public, max-age={PHOTO_MAX_AGE}",
+    }
+    if etag_matches(if_none_match, sha256):
+        return Response(status_code=304, headers=headers)
+    return Response(image, media_type="image/jpeg", headers=headers)
 
 
 @app.get("/bills/{congress}/{bill_type}/{bill_number}", response_model=BillOut)

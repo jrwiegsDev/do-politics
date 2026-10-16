@@ -254,6 +254,47 @@ a:focus-visible {
   border-top: 0;
 }
 
+/* A photo sits to the left of the name. The img tag's width and height give
+   the shape, so the browser keeps the room for it while it loads, and the
+   rules below set the size it is shown at. */
+.official,
+.member-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.photo-small,
+.photo-large {
+  flex: none;
+  height: auto;
+  border-radius: 6px;
+  background: var(--line);
+  object-fit: cover;
+}
+
+.photo-small {
+  width: 3rem;
+}
+
+.photo-large {
+  width: 6rem;
+}
+
+.member-header h2 {
+  margin-bottom: 0.25rem;
+}
+
+.member-header .official-role {
+  margin: 0;
+}
+
+.photo-credit {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
 /* A name, or a vote's bill, is a button that looks like a link: it does
    something on this page and does not go to another one. */
 .official-name,

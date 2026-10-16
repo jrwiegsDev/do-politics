@@ -1,8 +1,18 @@
-<h2>{{ official.name }}</h2>
-<p class="official-role">
-  {{ "Senator" if official.chamber == "senate" else "Representative" }}
-  ({{ official.party }}, {{ official.state }})
-</p>
+{% from "_photo.html" import photo %}
+<div class="member-header">
+  {{ photo(official, "photo-large") }}
+  <div>
+    <h2>{{ official.name }}</h2>
+    <p class="official-role">
+      {{ "Senator" if official.chamber == "senate" else "Representative" }}
+      ({{ official.party }}, {{ official.state }})
+    </p>
+    {# Congress.gov names whom to credit for the photos it supplies. #}
+    {% if official.photo_credit %}
+    <p class="photo-credit">Photo: {{ official.photo_credit }}</p>
+    {% endif %}
+  </div>
+</div>
 
 <ul class="contact">
   {% if official.phone %}
