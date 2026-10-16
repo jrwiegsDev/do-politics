@@ -7,8 +7,10 @@ from psycopg.rows import dict_row
 
 FIND_OFFICIALS_SQL = """
 SELECT bioguide_id, name, party, chamber, state, district_code,
-       phone, office_address, website, contact_form
+       phone, office_address, website, contact_form,
+       p.bioguide_id IS NOT NULL AS has_photo, p.attribution AS photo_credit
 FROM officials
+LEFT JOIN member_photos AS p USING (bioguide_id)
 WHERE state_fips = %(state_fips)s
   AND (chamber = 'senate' OR district_code = %(district_code)s)
   AND term_start <= %(on_date)s
@@ -18,8 +20,10 @@ ORDER BY chamber DESC, name;
 
 FIND_OFFICIAL_SQL = """
 SELECT bioguide_id, name, party, chamber, state, district_code,
-       phone, office_address, website, contact_form
+       phone, office_address, website, contact_form,
+       p.bioguide_id IS NOT NULL AS has_photo, p.attribution AS photo_credit
 FROM officials
+LEFT JOIN member_photos AS p USING (bioguide_id)
 WHERE bioguide_id = %(bioguide_id)s;
 """
 

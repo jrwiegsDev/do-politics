@@ -1,0 +1,11 @@
+{# A member's photo, or a plain silhouette when none is stored. The name is
+   always printed beside it, so the alt text is empty: a screen reader skips
+   the image instead of reading the name twice. width and height give the
+   photo's shape; the stylesheet sets the size it is shown at. #}
+{% macro photo(official, size) -%}
+{% if official.has_photo %}
+<img class="{{ size }}" src="/photos/{{ official.bioguide_id }}.jpg" alt="" width="225" height="275">
+{% else %}
+<img class="{{ size }}" src="/static/no-photo.svg" alt="" width="225" height="275">
+{% endif %}
+{%- endmacro %}

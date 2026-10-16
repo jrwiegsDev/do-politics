@@ -1,25 +1,34 @@
+{% from "_photo.html" import photo %}
 <h2>{{ district.name }}</h2>
 {# Choosing a name asks the server for that member's tile and puts it in the
    member slot. The officials tile itself stays where it is. #}
 <ul class="officials">
   {% for senator in senators %}
-  <li>
-    <button type="button" class="official-name"
-            hx-get="/tiles/members/{{ senator.bioguide_id }}"
-            hx-target="#member-tile" hx-swap="innerHTML">{{ senator.name }}</button>
-    <div class="official-role">Senator ({{ senator.party }}, {{ senator.state }})</div>
+  <li class="official">
+    {{ photo(senator, "photo-small") }}
+    <div>
+      <button type="button" class="official-name"
+              hx-get="/tiles/members/{{ senator.bioguide_id }}"
+              hx-target="#member-tile" hx-swap="innerHTML">{{ senator.name }}</button>
+      <div class="official-role">Senator ({{ senator.party }}, {{ senator.state }})</div>
+    </div>
   </li>
   {% endfor %}
-  <li>
-    {% if representative %}
-    <button type="button" class="official-name"
-            hx-get="/tiles/members/{{ representative.bioguide_id }}"
-            hx-target="#member-tile" hx-swap="innerHTML">{{ representative.name }}</button>
-    <div class="official-role">Representative ({{ representative.party }}, {{ representative.state }})</div>
-    {% else %}
-    <div class="vacant">This House seat is currently vacant.</div>
-    {% endif %}
+  {% if representative %}
+  <li class="official">
+    {{ photo(representative, "photo-small") }}
+    <div>
+      <button type="button" class="official-name"
+              hx-get="/tiles/members/{{ representative.bioguide_id }}"
+              hx-target="#member-tile" hx-swap="innerHTML">{{ representative.name }}</button>
+      <div class="official-role">Representative ({{ representative.party }}, {{ representative.state }})</div>
+    </div>
   </li>
+  {% else %}
+  <li>
+    <div class="vacant">This House seat is currently vacant.</div>
+  </li>
+  {% endif %}
 </ul>
 
 {% include "_clear_tiles.html" %}

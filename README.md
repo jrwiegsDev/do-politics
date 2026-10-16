@@ -140,7 +140,7 @@ uv run --env-file .env alembic upgrade head
 
 Each migration runs in a transaction, so a failure leaves the schema unchanged. Alembic connects through the same `ingest/db.py` function as the ingestion jobs, so no database URL or password is kept in `alembic.ini`.
 
-To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0008`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
+To add a change, create the next file with `uv run alembic revision -m "describe the change" --rev-id 0009`, write the SQL in `upgrade()` and its reverse in `downgrade()`. A migration that has been pushed is never edited. A correction goes in a new one.
 
 The only SQL outside the migrations is `db/init/001_extensions.sql`, which enables PostGIS when the local container is first created so its health check can pass.
 
@@ -204,6 +204,20 @@ The load is idempotent, keyed on the member's Bioguide ID, which stays the same 
 ### Looking up a seat
 
 `find_officials` in `app/officials.py` returns the sitting members for a state and district: the senators first, then the representative. It filters on term dates the same way the district lookup filters on map dates, so a member whose term has ended is left out even if the data hasn't been refreshed. The end date is exclusive, so a term ending on January 3 and its successor starting that day never both match.
+
+## Photos
+
+The `member_photos` table (`migrations/versions/0008_member_photos.py`) holds one photo per member, as the image itself. A Render server's disk is replaced on every deploy, so a folder of downloaded files would vanish; rows in Postgres do not, and a new photo needs no deploy. Each row also keeps the image's SHA-256, where it was downloaded from, and the credit line its source asks for, if any.
+
+`ingest/photos.py` loads a photo for every sitting member:
+
+```
+uv run --env-file .env python -m ingest.photos
+```
+
+[unitedstates/images](https://github.com/unitedstates/images) is asked first: its photos are public domain, 225 by 275 pixels, and named by Bioguide ID. When it has none, usually for a member who arrived in a special election, the member's record on the Congress.gov API supplies one, with a credit such as "Courtesy U.S. Senate Historical Office" that the member tile shows under the photo. A member neither source has gets a plain silhouette. Every download must start like a JPEG and be under 1 MB, and the table checks the size again.
+
+The load is idempotent, keyed on the Bioguide ID. A photo whose image and credit are unchanged is not written again, so `updated_at` says when a photo last changed and the run reports how many did. A photo belongs to a row in `members`, so run `ingest.members` and `ingest.officials` first. Each run is recorded in `ingestion_runs`; add `--limit` to stop after a few members.
 
 ## Members
 
@@ -294,6 +308,7 @@ The API is a FastAPI app in `app/main.py`.
 | `POST` | `/lookup` | Takes a street address in four fields, returns the district and its members of Congress |
 | `GET` | `/members/{bioguide_id}/votes` | Returns a member's most recent votes, newest first |
 | `GET` | `/bills/{congress}/{bill_type}/{bill_number}` | Returns a bill and its official summaries |
+| `GET` | `/photos/{bioguide_id}.jpg` | Returns a member's photo |
 
 ```
 curl -X POST http://127.0.0.1:8000/lookup \
@@ -311,6 +326,8 @@ The address is four fields, not one line, so nobody has to guess where the comma
 }
 ```
 
+Each senator and the representative also carry `has_photo` and `photo_credit`. When `has_photo` is true, the photo is at `/photos/{bioguide_id}.jpg`.
+
 A request runs three steps: `geocode` in `app/geocoder.py` asks the Census Geocoder for the address's coordinates, `find_district` finds the district containing that point, and `find_officials` returns who holds its seats. `lookup` in `app/lookup.py` joins the last two.
 
 | Outcome | Response |
@@ -323,6 +340,14 @@ A request runs three steps: `geocode` in `app/geocoder.py` asks the Census Geoco
 | Census Geocoder unreachable | `503` |
 
 The lookup is a `POST` with the address in the request body on purpose. A `GET` would put the address in the URL, and URLs are written to access logs by web servers and proxies. The HTTP client's own request logging is turned down for the same reason, and a geocoder failure is reported by its type only, because the full error message contains the request URL.
+
+### A member's photo
+
+```
+curl -i http://127.0.0.1:8000/photos/D000563.jpg
+```
+
+The answer is the JPEG, with two headers that let a browser skip asking for it again. `Cache-Control: public, max-age=86400` lets it reuse the photo for a day without asking. After that it asks again and sends the `ETag` it was given in an `If-None-Match` header. The ETag is the photo's SHA-256, so when it still matches, the answer is `304 Not Modified` with no body, and the image is not sent twice. A member with no stored photo gets `404`, and an ID that is not a Bioguide ID gets `422`.
 
 ### A member's votes
 
@@ -423,6 +448,8 @@ The form has separate fields for street, city, state and ZIP code. Each one name
 
 The privacy rules hold here too. The address travels in the body of a `POST` and is never sent back in the HTML or written to a log. The form also declares `method="post"`, because a form sends with `GET` by default and that would put the address in the URL if the script ever failed to load. The stylesheet and the script are served from this app, so opening the page asks no other site for anything.
 
+Each official is shown with a photo, which the app serves from its own database (see [Photos](#photos)), so the page still asks no other site for anything.
+
 Choosing an official opens the member tile beside the officials tile. It shows how to reach them, their attendance for each session, and their recent final votes, twenty at a time, with a dropdown of the policy areas their votes touched. Attendance counts every roll call that listed the member, and every position except `Not Voting` counts as taking part. The chosen topic and how far down the list a visitor has read travel with each request, so the server keeps nothing between one request and the next. A vote's date is the day in Washington, where Congress sits.
 
 Choosing a vote on a stored bill opens the bill tile across the full width underneath. It shows the bill as Congress writes it (`H.R. 1`), its sponsor, when it was introduced, its topic and its latest action, then the official CRS summaries, newest stage first. The newest summary is open and older stages fold away under their stage and date, using the browser's own `<details>` element. A bill with no official summary says so, and the tile always names the Congressional Research Service as the summaries' author and links to the bill on Congress.gov. A nomination, or a bill not loaded yet, is shown as plain text and opens nothing.
@@ -491,5 +518,6 @@ After that, `git commit` runs the checks first and stops if one fails, so a mist
 | [Census Geocoder](https://geocoding.geo.census.gov/) | Address to coordinates |
 | [Census TIGER/Line](https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html) | District boundaries |
 | [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) | Current and former members, IDs, office contacts |
-| [Congress.gov API](https://api.congress.gov/) | Bills, actions, official summaries |
+| [Congress.gov API](https://api.congress.gov/) | Bills, actions, official summaries, photos the project below lacks |
+| [unitedstates/images](https://github.com/unitedstates/images) | Members' photos (public domain) |
 | [House Clerk](https://clerk.house.gov/) / [Senate.gov](https://www.senate.gov/) | Roll-call votes |
