@@ -20,3 +20,6 @@ data/
 
 # Coverage data written by pytest --cov
 .coverage
+
+# Traces, screenshots and videos written by the browser tests
+test-results/

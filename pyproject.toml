@@ -16,9 +16,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "playwright==1.63.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pytest-playwright==0.10.0",
     "ruff>=0.17.0",
     "ty>=0.0.86",
 ]
@@ -30,6 +32,13 @@ extend-exclude = ["migrations/versions"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Browser tests and the test that calls the real Census are left out of a
+# plain `pytest`. Choosing them with -m on the command line replaces this.
+addopts = ["-m", "not e2e and not census", "--strict-markers"]
+markers = [
+    "e2e: drives a real browser through the running app (tests/e2e)",
+    "census: calls the real Census Geocoder, so it needs the internet",
+]
 
 [tool.coverage.run]
 # Measured only when pytest is given --cov, as CI does.
