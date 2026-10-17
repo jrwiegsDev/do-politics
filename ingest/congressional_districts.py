@@ -93,6 +93,18 @@ NOT_A_DISTRICT = "ZZ"
 # 2024 election, so their current maps date from the 119th (seated 2025-01-03).
 REDRAWN_FOR_119TH = {"01", "13", "22", "36", "37"}
 
+# Census files that hold a map no Congress was elected under, keyed by (state
+# FIPS, Congress), with the reason printed when the loader skips one. The
+# Census publishes the map a legislature enacted even when the courts kept it
+# from being used. Skipping the file leaves the state's older map in effect,
+# because only a load closes it.
+WRONG_MAP_FILES = {
+    ("29", 120): (
+        "Missouri's 2025 map was suspended by a referendum petition, and the"
+        " U.S. Supreme Court ordered the 2022 map used for the 2026 election"
+    ),
+}
+
 UPSERT_SQL = """
 INSERT INTO districts (level, chamber, state_fips, code, geoid, name, effective_from, source, boundary)
 VALUES (%(level)s, %(chamber)s, %(state_fips)s, %(code)s, %(geoid)s, %(name)s, %(effective_from)s, %(source)s, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%(boundary)s), 4269)))
@@ -101,6 +113,18 @@ DO UPDATE SET
     name = EXCLUDED.name,
     source = EXCLUDED.source,
     boundary = EXCLUDED.boundary;
+"""
+
+# A newer map ends the one before it: the old rows stop matching the day the
+# new ones start. Rows already closed are left alone, so a re-run changes nothing.
+CLOSE_OLDER_MAPS_SQL = """
+UPDATE districts
+SET effective_to = %(effective_from)s
+WHERE level = 'federal'
+  AND chamber = 'house'
+  AND state_fips = %(state_fips)s
+  AND effective_from < %(effective_from)s
+  AND effective_to IS NULL;
 """
 
 
@@ -162,11 +186,21 @@ def read_districts(shp_path: Path, congress: int, effective_from: date):
 def load_state(
     conn, name: str, vintage: int, congress: int, effective_from: date
 ) -> int:
-    """Download, read and upsert one state's districts as one recorded run."""
+    """Download, read and upsert one state's districts as one recorded run.
+
+    Any older map of the same state is closed in the same transaction, so the
+    state never has two maps in effect on the same day.
+    """
     with record_run(conn, JOB, name) as run:
         rows = list(read_districts(fetch(name, vintage), congress, effective_from))
         with conn.cursor() as cur:
             cur.executemany(UPSERT_SQL, rows)
+            # A file holds one state, so this is normally a single update.
+            for state_fips in {row["state_fips"] for row in rows}:
+                cur.execute(
+                    CLOSE_OLDER_MAPS_SQL,
+                    {"state_fips": state_fips, "effective_from": effective_from},
+                )
         run.rows_loaded = len(rows)
 
     return len(rows)
@@ -210,6 +244,11 @@ def main() -> None:
 
     def effective_from(state: str) -> date:
         return args.effective_from or effective_from_for(state)
+
+    skipped = [state for state in states if (state, args.congress) in WRONG_MAP_FILES]
+    for state in skipped:
+        print(f"SKIPPED {name_for(state)}: {WRONG_MAP_FILES[state, args.congress]}")
+    states = tuple(state for state in states if state not in skipped)
 
     if args.dry_run:
         for state in states:

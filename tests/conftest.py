@@ -1,5 +1,6 @@
 """Shared test setup: a throwaway database with the schema and Illinois loaded."""
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,11 @@ TEST_DB = "dopolitics_test"
 ILLINOIS = "17"
 VINTAGE = 2025
 CONGRESS = 119
+# Illinois's map for the 120th Congress is loaded too, so the tests can check
+# the switch from one map to the next on the day the new Congress is seated.
+NEXT_VINTAGE = 2026
+NEXT_CONGRESS = 120
+NEXT_CONGRESS_SEATED = date(2027, 1, 3)
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 
@@ -43,6 +49,10 @@ def database():
             with connect() as conn:
                 name = f"tl_{VINTAGE}_{ILLINOIS}_cd{CONGRESS}"
                 load_state(conn, name, VINTAGE, CONGRESS, effective_from_for(ILLINOIS))
+                next_name = f"tl_{NEXT_VINTAGE}_{ILLINOIS}_cd{NEXT_CONGRESS}"
+                load_state(
+                    conn, next_name, NEXT_VINTAGE, NEXT_CONGRESS, NEXT_CONGRESS_SEATED
+                )
 
             yield
 

@@ -187,6 +187,16 @@ ORDER BY started_at DESC;
 
 Each map's `effective_from` is the date the first Congress elected under it was seated: 2023-01-03 for most states, and 2025-01-03 for the five that redrew before the 2024 election (Alabama, Georgia, Louisiana, New York, North Carolina). The loader looks this up by state.
 
+Any other map needs its Congress, TIGER/Line release and start date given. The maps for the 120th Congress, seated 2027-01-03, load ahead of time:
+
+```
+uv run --env-file .env python -m ingest.congressional_districts --state all --vintage 2026 --congress 120 --effective-from 2027-01-03
+```
+
+Loading a newer map closes the state's older one in the same transaction: the older rows get an `effective_to` equal to the new `effective_from`. Because `effective_to` is exclusive, the old map answers through 2027-01-02 and the new one from 2027-01-03, with no day on which a point falls in two districts or in none. A state that did not redraw still gets new rows, identical to the old ones, so every state switches on the same day.
+
+The Census publishes the map a legislature enacted, even when the courts kept it from being used, so each redrawn state's file is checked against the map its election actually used. `WRONG_MAP_FILES` lists the files that fail that check, and the loader skips them, leaving the state's older map in effect. Missouri's file for the 120th Congress holds its 2025 map, which a referendum petition suspended; the U.S. Supreme Court ordered the 2022 map used for the 2026 election.
+
 ## Officials
 
 The `officials` table (`migrations/versions/0003_officials.py`) holds one row per sitting member of Congress: name, party, chamber, state, term dates and DC office contacts (phone, address, website, and a contact form where one is published). A vacant seat has no row, so the app can say a seat is vacant instead of showing a placeholder.
