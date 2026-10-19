@@ -35,9 +35,9 @@ Addresses are never stored. An address is geocoded, resolved to districts and di
 
 ## Summaries
 
-In v1 every summary is an official one: the Congressional Research Service summary of the bill, as published on Congress.gov. Each is shown with the stage of the bill it describes, its date, and a link to the bill's page. A bill with no official summary says so. No summary is written or reworded by this project or by a language model.
+Every bill shows its official summary: the Congressional Research Service summary, as published on Congress.gov, with the stage of the bill it describes, its date, and a link to the bill's page. A bill with no official summary says so.
 
-Generated plain-language summaries may come later. If they do, each will be labeled as generated, link to the official source, and follow a published editorial policy.
+Plain-language summaries, and a short "How this does you" callout, are written by Claude from that official summary and follow the published [editorial policy](docs/editorial-policy.md). None appears on the site until a person has read and approved it, and each will be labeled as generated beside the official summary it came from. They are being written and reviewed now and are not on the site yet. See [Generated summaries](#generated-summaries).
 
 ## Stack (planned)
 
@@ -307,6 +307,33 @@ Summaries are published as HTML. `html_to_text` in `ingest/plain_text.py` conver
 Some bills have no official summary, and some never get one. That is stored as a bill with no summary rows, and the API returns an empty list for it.
 
 The load is idempotent: a bill is keyed on its Congress, type and number, and a summary on its bill and version. Each bill is committed with its summaries as soon as it is saved, so a run that fails partway keeps what it had. A bill Congress.gov does not have is reported and skipped; any other failure, such as a refused key, fails the run. Each run is recorded in `ingestion_runs`. Every sponsor must be a row in `members`, so run `ingest.members` first.
+
+### Generated summaries
+
+`ingest/summaries.py` asks Claude for two texts per bill, written from its newest CRS summary: a plain-language summary and a one-to-three-sentence "How this does you" callout. The instructions are in `ingest/prompt.py`, followed by the editorial policy read from `docs/editorial-policy.md`, so the policy readers see is the policy the model follows. Each answer is stored in `generated_summaries` (`migrations/versions/0009_generated_summaries.py`) as a draft, with the prompt version, the model, its token counts and what it cost.
+
+The API key is read from `ANTHROPIC_API_KEY` in `.env`. Only these commands send requests, and only when run by hand or on a schedule; the web app never imports the Anthropic SDK, and a test checks that.
+
+```
+uv run --env-file .env python -m ingest.summaries estimate --limit 10
+uv run --env-file .env python -m ingest.summaries sample --bill 119/hr/498
+uv run --env-file .env python -m ingest.summaries submit --budget 6
+uv run --env-file .env python -m ingest.summaries collect msgbatch_...
+uv run --env-file .env python -m ingest.summaries review
+uv run --env-file .env python -m ingest.summaries review --previous
+uv run --env-file .env python -m ingest.summaries revise
+```
+
+- `estimate` counts tokens, which is free, and prints the most the requests could cost.
+- `sample` sends requests one at a time and prints each answer, for tuning the prompt.
+- `submit` sends them through the Batch API at half price, and `collect` stores the answers once the batch has ended.
+- `sample`, `submit` and `revise` refuse to send anything when the most it could cost is over `--budget` dollars.
+
+**The prompt version.** It is a 12-character fingerprint of the full instructions, so any edit to the prompt or the policy gives a new version, and every stored answer names the exact instructions it was written under. A new version makes every bill due again, except a bill whose summary is already approved. Naming a bill with `--bill` writes it again anyway.
+
+**Review.** `review` shows each draft beside the CRS summary it came from, one at a time, to approve, reject or skip, with an optional note. Each decision is saved as it is made. `review --previous` first walks the decisions of the last 7 days, newest first, so a mistake can be sent back to the drafts. Times are shown in the local time zone.
+
+**Revisions.** An approval with no note means the text is final. An approval with a note means the text goes live as it is, but the note asks for a change. `revise` sends the approved text and the note back to Claude, with instructions to make that change and keep every other sentence word for word, and stores the result as a new draft that points back to the row it revises. The next `review` shows revisions first, with the date and the note, and the changed words marked `[-removed-] {+added+}`. Approving a revision puts it on the site in place of the original; rejecting it keeps the original. Each row is revised only once, so a rejected revision is not tried again on every run.
 
 ## API
 
