@@ -10,6 +10,7 @@ from helpers import (
     SENATOR_B,
     add,
     add_bill,
+    add_generated,
     add_members,
     add_vote,
     summary,
@@ -273,6 +274,22 @@ def test_bill_with_no_official_summary_has_an_empty_list(client, conn):
 
     assert response.status_code == 200
     assert response.json()["summaries"] == []
+
+
+def test_bill_does_not_send_the_generated_summary_yet(client, conn):
+    # The bill tile shows an approved generated summary; the API is left as it
+    # was until it is decided how the API should label one.
+    add_members(conn)
+    add_bill(
+        conn,
+        summaries=[summary("00", date(2025, 1, 15), "Introduced in House", "CRS.")],
+    )
+    add_generated(conn, "Plain words")
+
+    body = client.get("/bills/119/hr/9999").json()
+
+    assert "generated" not in body
+    assert "Plain words" not in str(body)
 
 
 def test_bill_never_sends_the_original_html_even_if_the_query_returns_it(

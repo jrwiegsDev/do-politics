@@ -423,6 +423,35 @@ select {
   font-size: 0.875rem;
 }
 
+/* The approved plain-language summary, set apart from the official text
+   by the page's paper colour and an accent rule down its left side. */
+.generated {
+  margin-top: 1.25rem;
+  padding: 0.25rem 1rem 0.75rem;
+  border-left: 4px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--paper);
+}
+
+.tile .generated h3 {
+  margin-top: 0.75rem;
+}
+
+.generated h4 {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.9375rem;
+}
+
+.generated-text {
+  margin: 0;
+}
+
+.generated-label {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
 a {
   color: var(--accent);
 }

@@ -1,6 +1,6 @@
-"""Made-up officials, members and votes shared by the tests."""
+"""Made-up officials, members, votes and bills shared by the tests."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from ingest.bills import save as save_bill
 from ingest.members import UPSERT_SQL as UPSERT_MEMBER_SQL
@@ -142,6 +142,56 @@ def add_bill(conn, bill_number=9999, summaries=(), policy_area="Energy") -> None
         "source_updated_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
     save_bill(conn, bill, list(summaries))
+
+
+# Generated summaries are written in order, a minute apart, from this moment.
+FIRST_WRITTEN = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
+
+
+def add_generated(
+    conn,
+    text,
+    status="approved",
+    *,
+    bill_number=9999,
+    version_code="00",
+    prompt_version="prompt-1",
+    revised_from=None,
+    minute=0,
+) -> int:
+    """Store a made-up generated summary of a stored bill and return its id.
+
+    It is written `minute` minutes after FIRST_WRITTEN, so a test can say
+    which came first. Anything but a draft is reviewed at the same moment.
+    """
+    written = FIRST_WRITTEN + timedelta(minutes=minute)
+    row = conn.execute(
+        """
+        INSERT INTO generated_summaries (
+            bill_id, source, source_version_code, plain_summary, impact, model,
+            prompt_version, status, reviewed_at, input_tokens, output_tokens,
+            cost_usd, generated_at, revised_from
+        )
+        SELECT id, 'crs_summary', %(version_code)s, %(text)s, %(impact)s,
+               'claude-test', %(prompt_version)s, %(status)s, %(reviewed_at)s,
+               100, 50, 0.001, %(written)s, %(revised_from)s
+        FROM bills
+        WHERE bill_number = %(bill_number)s
+        RETURNING id
+        """,
+        {
+            "version_code": version_code,
+            "text": text,
+            "impact": f"How {text} does you.",
+            "prompt_version": prompt_version,
+            "status": status,
+            "reviewed_at": None if status == "draft" else written,
+            "written": written,
+            "revised_from": revised_from,
+            "bill_number": bill_number,
+        },
+    )
+    return row.fetchone()[0]
 
 
 # The smallest thing the loader accepts as a JPEG: its three opening bytes.

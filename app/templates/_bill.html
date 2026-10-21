@@ -16,6 +16,24 @@
   {% endif %}
 </dl>
 
+{# Shown only once a person has approved it, labelled as generated, and
+   naming the official summary below that it was written from. #}
+{% if bill.generated %}
+<div class="generated">
+  <h3>In plain language</h3>
+  <p class="generated-text">{{ bill.generated.plain_summary }}</p>
+  <h4>How this does you</h4>
+  <p class="generated-text">{{ bill.generated.impact }}</p>
+  <p class="generated-label">
+    Written by Claude, an AI model, from the official summary below
+    ({{ bill.generated.source_action_desc }},
+    {{ bill.generated.source_action_on | long_date }}), and reviewed by
+    DoPolitics before it appeared.
+    <a href="https://github.com/jrwiegsDev/do-politics/blob/main/docs/editorial-policy.md" rel="noopener">Read our editorial policy</a>
+  </p>
+</div>
+{% endif %}
+
 <h3>Official summaries</h3>
 {# Newest stage first. Only the newest is open; the others fold away and
    open with a click, with no script involved. #}
