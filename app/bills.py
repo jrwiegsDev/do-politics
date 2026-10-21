@@ -1,4 +1,4 @@
-"""Find a bill and its official summaries."""
+"""Find a bill, its official summaries, and its approved generated summary."""
 
 from typing import Literal
 
@@ -37,6 +37,23 @@ WHERE bill_id = %(bill_id)s
 ORDER BY action_on DESC, version_code DESC;
 """
 
+# The newest approved row is the end of its revision chain: a revision is
+# always written after the row it revises, and a draft or rejected revision
+# leaves the row before it showing. The inner join hides a generated summary
+# whose official summary is gone, since it is only shown beside its source.
+GENERATED_SUMMARY_SQL = """
+SELECT g.plain_summary, g.impact,
+       s.action_desc AS source_action_desc, s.action_on AS source_action_on
+FROM generated_summaries g
+JOIN bill_summaries s
+  ON s.bill_id = g.bill_id AND s.version_code = g.source_version_code
+WHERE g.bill_id = %(bill_id)s
+  AND g.source = 'crs_summary'
+  AND g.status = 'approved'
+ORDER BY g.generated_at DESC, g.id DESC
+LIMIT 1;
+"""
+
 
 def bill_label(bill_type: str, bill_number: int) -> str:
     """Return a bill's name as Congress writes it, such as 'H.R. 1' or 'S.J.Res. 12'."""
@@ -49,7 +66,8 @@ def find_bill(
     """Return a bill with its official summaries, newest stage first.
 
     Returns None when the bill is not stored. A bill with no official
-    summary has an empty list.
+    summary has an empty list. 'generated' holds the approved plain-language
+    summary and the stage it was written from, or None when none is approved.
     """
     params = {"congress": congress, "bill_type": bill_type, "bill_number": bill_number}
     with conn.cursor(row_factory=dict_row) as cur:
@@ -57,7 +75,10 @@ def find_bill(
         if bill is None:
             return None
 
-        summaries = cur.execute(FIND_SUMMARIES_SQL, {"bill_id": bill.pop("id")})
+        bill_id = bill.pop("id")
+        summaries = cur.execute(FIND_SUMMARIES_SQL, {"bill_id": bill_id})
         bill["summaries"] = summaries.fetchall()
+        generated = cur.execute(GENERATED_SUMMARY_SQL, {"bill_id": bill_id})
+        bill["generated"] = generated.fetchone()
 
     return bill

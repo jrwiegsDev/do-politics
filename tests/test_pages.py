@@ -11,6 +11,7 @@ from helpers import (
     SENATOR_B,
     add,
     add_bill,
+    add_generated,
     add_members,
     add_vote,
     official,
@@ -584,6 +585,61 @@ def test_bill_tile_never_links_to_something_that_is_not_a_web_address(client, co
     tile = client.get(BILL).text
 
     assert "javascript:" not in tile
+
+
+INTRODUCED = summary("00", date(2025, 1, 15), "Introduced in House", "CRS words.")
+POLICY = "https://github.com/jrwiegsDev/do-politics/blob/main/docs/editorial-policy.md"
+
+
+def test_bill_tile_shows_an_approved_summary_above_the_official_ones(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Plain words")
+
+    tile = client.get(BILL).text
+
+    assert "In plain language" in tile
+    assert "How this does you" in tile
+    assert "How Plain words does you." in tile
+    assert tile.index("Plain words") < tile.index("Official summaries")
+    assert tile.index("Official summaries") < tile.index("CRS words.")
+
+
+def test_an_approved_summary_is_labelled_as_generated_with_its_source(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Plain words")
+
+    tile = " ".join(client.get(BILL).text.split())
+
+    assert "Written by Claude, an AI model, from the official summary below" in tile
+    assert "(Introduced in House, Jan 15, 2025)" in tile
+    assert "reviewed by DoPolitics" in tile
+    assert f'href="{POLICY}"' in tile
+
+
+@pytest.mark.parametrize("status", ["draft", "rejected"])
+def test_bill_tile_never_shows_a_summary_nobody_approved(client, conn, status):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Unreviewed words", status)
+
+    tile = client.get(BILL).text
+
+    assert "Unreviewed words" not in tile
+    assert "In plain language" not in tile
+    assert "CRS words." in tile
+
+
+def test_a_generated_summary_is_shown_as_text_and_never_as_html(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "<script>alert(1)</script>")
+
+    tile = client.get(BILL).text
+
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in tile
+    assert "<script>" not in tile
 
 
 def test_bill_tile_for_a_bill_not_stored_is_404(client, conn):
