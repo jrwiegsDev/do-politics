@@ -10,7 +10,8 @@ DoPolitics is openly progressive. This page says how the site writes about bills
 ## How we write about a bill
 
 - We say plainly who a bill helps, who pays for it, and when. When a bill cuts benefits, shifts costs onto working families, or delays its harm until after an election, we say so. We do not soften harm to working and middle-class people.
-- Every fact comes from the official record: what the bill does, who it affects, how much, and when. If the record does not say, we do not guess.
+- Every fact about what a bill does comes from the official record: what it does, who it affects, how much, and when. If the record does not say, we do not guess.
+- To help you see what a bill means for you, we may describe its widely known effects, such as what mining can do to a lake, or ask you to imagine yourself in the group it reaches. We never add numbers, places or names the official record does not give.
 - We make reasonable inferences on how a bill or piece of legislation would affect lower-income, middle-class, and average Americans.
 
 ## Corrections
