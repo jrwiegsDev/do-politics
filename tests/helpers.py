@@ -84,12 +84,14 @@ def add_vote(
     title="Example Act",
     issue="H R 9999",
     session=2,
+    parties=None,
 ):
     """Store a made-up vote held at noon UTC on the given day of January 2026.
 
     positions maps a bioguide ID to how that member voted, such as
-    {"T000001": "Yea"}. The vote's category is worked out from its question,
-    and its bill from its issue, exactly as the loader does it.
+    {"T000001": "Yea"}, and parties maps a bioguide ID to the member's party,
+    which is "I" for anyone not named. The vote's category is worked out from
+    its question, and its bill from its issue, exactly as the loader does it.
     """
     vote = {
         "chamber": chamber,
@@ -105,7 +107,12 @@ def add_vote(
         "source_url": f"https://example.test/{chamber}/{roll_number}",
     }
     rows = [
-        {"bioguide_id": b, "position": p, "party": "I", "state": "IL"}
+        {
+            "bioguide_id": b,
+            "position": p,
+            "party": (parties or {}).get(b, "I"),
+            "state": "IL",
+        }
         for b, p in positions.items()
     ]
     save(conn, vote, rows)

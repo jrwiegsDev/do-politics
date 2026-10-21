@@ -1,49 +1,53 @@
 {% from "_photo.html" import photo %}
-<div class="member-header">
-  {{ photo(official, "photo-large") }}
-  <div>
-    <h2>{{ official.name }}</h2>
-    <p class="official-role">
-      {{ "Senator" if official.chamber == "senate" else "Representative" }}
-      ({{ official.party }}, {{ official.state }})
-    </p>
-    {# Congress.gov names whom to credit for the photos it supplies. #}
-    {% if official.photo_credit %}
-    <p class="photo-credit">Photo: {{ official.photo_credit }}</p>
-    {% endif %}
+{# Who this is, how to reach them, and how often they vote stay pinned to
+   the top of the tile while the votes scroll beneath, so it is always clear
+   whose votes these are. #}
+<div class="member-pinned">
+  <div class="member-header">
+    {{ photo(official, "photo-large") }}
+    <div>
+      <h2>{{ official.name }}</h2>
+      <p class="official-role">
+        {{ "Senator" if official.chamber == "senate" else "Representative" }}
+        ({{ official.party }}, {{ official.state }})
+      </p>
+      {# Only a web address is ever made into a link. #}
+      <ul class="contact contact-links">
+        {% if official.phone %}
+        <li>Phone: <a href="tel:{{ official.phone }}">{{ official.phone }}</a></li>
+        {% endif %}
+        {% if official.website and official.website.startswith("https://") %}
+        <li><a href="{{ official.website }}" rel="noopener">Official website</a></li>
+        {% endif %}
+        {% if official.contact_form and official.contact_form.startswith("https://") %}
+        <li><a href="{{ official.contact_form }}" rel="noopener">Contact form</a></li>
+        {% endif %}
+      </ul>
+      {% if official.office_address %}
+      <p class="contact-office">Office: {{ official.office_address }}</p>
+      {% endif %}
+      {# Congress.gov names whom to credit for the photos it supplies. #}
+      {% if official.photo_credit %}
+      <p class="photo-credit">Photo: {{ official.photo_credit }}</p>
+      {% endif %}
+    </div>
   </div>
+
+  <h3>Attendance</h3>
+  {% if attendance %}
+  <ul class="attendance">
+    {% for row in attendance %}
+    <li>
+      Congress {{ row.congress }}, session {{ row.session }}:
+      voted in {{ row.votes_cast }} of {{ row.roll_calls }} roll calls
+      ({{ "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%)
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="vote-none">No roll calls are on record for this member yet.</p>
+  {% endif %}
 </div>
-
-<ul class="contact">
-  {% if official.phone %}
-  <li>Phone: <a href="tel:{{ official.phone }}">{{ official.phone }}</a></li>
-  {% endif %}
-  {% if official.office_address %}
-  <li>Office: {{ official.office_address }}</li>
-  {% endif %}
-  {# Only a web address is ever made into a link. #}
-  {% if official.website and official.website.startswith("https://") %}
-  <li><a href="{{ official.website }}" rel="noopener">Official website</a></li>
-  {% endif %}
-  {% if official.contact_form and official.contact_form.startswith("https://") %}
-  <li><a href="{{ official.contact_form }}" rel="noopener">Contact form</a></li>
-  {% endif %}
-</ul>
-
-<h3>Attendance</h3>
-{% if attendance %}
-<ul class="attendance">
-  {% for row in attendance %}
-  <li>
-    Congress {{ row.congress }}, session {{ row.session }}:
-    voted in {{ row.votes_cast }} of {{ row.roll_calls }} roll calls
-    ({{ "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%)
-  </li>
-  {% endfor %}
-</ul>
-{% else %}
-<p class="vote-none">No roll calls are on record for this member yet.</p>
-{% endif %}
 
 <h3>Votes</h3>
 {# Choosing a topic asks the server for that topic's rows and puts them in

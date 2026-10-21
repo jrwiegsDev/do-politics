@@ -1,4 +1,4 @@
-"""Find a bill, its official summaries, and its approved generated summary."""
+"""Find a bill, its summaries, its approved generated summary, and its votes."""
 
 from typing import Literal
 
@@ -54,6 +54,28 @@ ORDER BY g.generated_at DESC, g.id DESC
 LIMIT 1;
 """
 
+# Every roll call on the bill, newest first, so the top one shows where it
+# stands. Votes on amendments are left out: they decide a change someone
+# offered, not the bill. 'Aye' and 'No' are how the House records some
+# votes, and count the same as 'Yea' and 'Nay'.
+BILL_VOTES_SQL = """
+SELECT v.chamber, v.roll_number, v.voted_at, v.question, v.result,
+       count(*) FILTER (WHERE p.party = 'R' AND p.position IN ('Yea', 'Aye')) AS r_yes,
+       count(*) FILTER (WHERE p.party = 'R' AND p.position IN ('Nay', 'No')) AS r_no,
+       count(*) FILTER (WHERE p.party = 'D' AND p.position IN ('Yea', 'Aye')) AS d_yes,
+       count(*) FILTER (WHERE p.party = 'D' AND p.position IN ('Nay', 'No')) AS d_no,
+       count(*) FILTER (WHERE p.party = 'I' AND p.position IN ('Yea', 'Aye')) AS i_yes,
+       count(*) FILTER (WHERE p.party = 'I' AND p.position IN ('Nay', 'No')) AS i_no
+FROM votes v
+JOIN vote_positions p ON p.vote_id = v.id
+WHERE v.congress = %(congress)s
+  AND v.bill_type = %(bill_type)s
+  AND v.bill_number = %(bill_number)s
+  AND v.question NOT LIKE 'On Agreeing to the Amendment%%'
+GROUP BY v.id
+ORDER BY v.voted_at DESC, v.roll_number DESC;
+"""
+
 
 def bill_label(bill_type: str, bill_number: int) -> str:
     """Return a bill's name as Congress writes it, such as 'H.R. 1' or 'S.J.Res. 12'."""
@@ -68,6 +90,8 @@ def find_bill(
     Returns None when the bill is not stored. A bill with no official
     summary has an empty list. 'generated' holds the approved plain-language
     summary and the stage it was written from, or None when none is approved.
+    'votes' holds each roll call on the bill, newest first, with how many
+    members of each party voted yes and no.
     """
     params = {"congress": congress, "bill_type": bill_type, "bill_number": bill_number}
     with conn.cursor(row_factory=dict_row) as cur:
@@ -80,5 +104,6 @@ def find_bill(
         bill["summaries"] = summaries.fetchall()
         generated = cur.execute(GENERATED_SUMMARY_SQL, {"bill_id": bill_id})
         bill["generated"] = generated.fetchone()
+        bill["votes"] = cur.execute(BILL_VOTES_SQL, params).fetchall()
 
     return bill

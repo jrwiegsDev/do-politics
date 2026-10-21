@@ -1,9 +1,9 @@
-"""Tests for looking up a bill, its official summaries and its generated summary."""
+"""Tests for looking up a bill, its summaries, and how each party voted on it."""
 
 from datetime import date
 
 import pytest
-from helpers import add_bill, add_generated, add_members, summary
+from helpers import add_bill, add_generated, add_members, add_vote, summary
 
 from app.bills import find_bill
 
@@ -39,6 +39,7 @@ def test_bill_comes_back_with_its_sponsors_name(conn):
         "source_url": "https://example.test/bill/9999",
         "summaries": [],
         "generated": None,
+        "votes": [],
     }
 
 
@@ -216,3 +217,115 @@ def test_only_the_bill_asked_for_brings_its_generated_summary(conn):
 
     assert stored(conn, 2)["generated"] is None
     assert stored(conn, 1)["generated"]["plain_summary"] == "For bill one"
+
+
+# How each party voted. Pat Example is a Republican and Sam Sample a Democrat
+# here; anyone not named in parties counts as an independent.
+PAT, SAM = "T000001", "T000002"
+PARTIES = {PAT: "R", SAM: "D"}
+
+
+def tallies(conn) -> list[tuple]:
+    """Return each vote's question and its party counts, in the order shown."""
+    return [
+        (
+            v["question"],
+            v["r_yes"],
+            v["r_no"],
+            v["d_yes"],
+            v["d_no"],
+            v["i_yes"],
+            v["i_no"],
+        )
+        for v in stored(conn)["votes"]
+    ]
+
+
+def test_a_vote_on_the_bill_comes_with_each_party_s_yes_and_no(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={PAT: "Yea", SAM: "Nay"}, parties=PARTIES)
+
+    vote = stored(conn)["votes"][0]
+
+    assert vote == {
+        "chamber": "house",
+        "roll_number": 7,
+        "voted_at": vote["voted_at"],
+        "question": "On Passage",
+        "result": "Passed",
+        "r_yes": 1,
+        "r_no": 0,
+        "d_yes": 0,
+        "d_no": 1,
+        "i_yes": 0,
+        "i_no": 0,
+    }
+    assert vote["voted_at"].day == 5
+
+
+def test_aye_and_no_count_the_same_as_yea_and_nay(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Aye", SAM: "No"}, parties=PARTIES)
+
+    assert tallies(conn) == [("On Passage", 1, 0, 0, 1, 0, 0)]
+
+
+@pytest.mark.parametrize("position", ["Not Voting", "Present"])
+def test_a_member_who_did_not_vote_yes_or_no_is_not_counted(conn, position):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: position, SAM: "Yea"}, parties=PARTIES)
+
+    assert tallies(conn) == [("On Passage", 0, 0, 1, 0, 0, 0)]
+
+
+def test_independents_are_counted_on_their_own(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea", SAM: "Nay"})
+
+    assert tallies(conn) == [("On Passage", 0, 0, 0, 0, 1, 1)]
+
+
+def test_votes_come_newest_first_so_the_top_one_is_where_it_stands(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 9, day=20, positions={PAT: "Yea"}, question="On Passage")
+    add_vote(conn, 3, day=6, positions={PAT: "Yea"}, question="On Motion to Recommit")
+
+    assert [v["question"] for v in stored(conn)["votes"]] == [
+        "On Passage",
+        "On Motion to Recommit",
+    ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["On Agreeing to the Amendment", "On Agreeing to the Amendment, as Modified"],
+)
+def test_votes_on_amendments_are_left_out(conn, question):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, question=question)
+
+    assert stored(conn)["votes"] == []
+
+
+def test_a_vote_to_agree_to_the_other_chamber_s_amendment_is_kept(conn):
+    add_members(conn)
+    add_bill(conn)
+    question = "On Motion to Concur in the Senate Amendment"
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, question=question)
+
+    assert [v["question"] for v in stored(conn)["votes"]] == [question]
+
+
+def test_only_votes_on_the_bill_asked_for_are_returned(conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 7777")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="S 9999")
+
+    assert stored(conn)["votes"] == []
