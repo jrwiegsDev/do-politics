@@ -11,11 +11,18 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.address import Address
-from app.bills import BillType, bill_label, find_bill
+from app.bills import BillType, bill_label, find_bill, find_member_votes
 from app.deps import Conn
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.officials import find_official
+from app.pay import (
+    MINIMUM_WAGE_DAY,
+    MINIMUM_WAGE_YEAR,
+    PAY_SOURCE_URL,
+    pay_for_session,
+    salary,
+)
 from app.votes import find_attendance, find_policy_areas, find_recent_votes
 
 # How many votes the member tile shows at a time.
@@ -35,16 +42,23 @@ def long_date(day: date) -> str:
     return f"{day:%b} {day.day}, {day.year}"
 
 
+def dollars(amount: int) -> str:
+    """Return a whole-dollar amount written out, such as '$174,000'."""
+    return f"${amount:,}"
+
+
 def vote_date(moment: datetime) -> str:
     """Return the day a vote was held, in Washington's time, such as 'Sep 16, 2026'."""
     return long_date(moment.astimezone(EASTERN))
 
 
 # A template uses these as {{ vote.voted_at | vote_date }}, {{ bill.introduced_on
-# | long_date }} and {{ bill.bill_type | bill_label(bill.bill_number) }}.
+# | long_date }}, {{ bill.bill_type | bill_label(bill.bill_number) }} and
+# {{ row.paid | dollars }}.
 templates.env.filters["long_date"] = long_date
 templates.env.filters["vote_date"] = vote_date
 templates.env.filters["bill_label"] = bill_label
+templates.env.filters["dollars"] = dollars
 
 
 def vote_page(conn: Conn, bioguide_id: str, topic: str | None, offset: int) -> dict:
@@ -152,10 +166,21 @@ def member_tile(request: Request, conn: Conn, bioguide_id: BioguideId) -> HTMLRe
     if official is None:
         return message(request, "Nobody holding a seat in Congress has that ID.", 404)
 
+    # The member's current leadership roles set the pay for every year shown.
+    yearly = salary(official["leadership_titles"])
+    today = date.today()
+    attendance = [
+        pay_for_session(row, yearly, official["term_start"], today)
+        for row in find_attendance(conn, bioguide_id)
+    ]
     context = vote_page(conn, bioguide_id, topic=None, offset=0) | {
         "official": official,
-        "attendance": find_attendance(conn, bioguide_id),
+        "attendance": attendance,
+        "salary": yearly,
         "topics": find_policy_areas(conn, bioguide_id),
+        "minimum_wage_day": MINIMUM_WAGE_DAY,
+        "minimum_wage_year": MINIMUM_WAGE_YEAR,
+        "pay_source_url": PAY_SOURCE_URL,
     }
     return templates.TemplateResponse(request, "_member.html", context)
 
@@ -185,10 +210,22 @@ def bill_tile(
     congress: Annotated[int, Path(ge=1)],
     bill_type: BillType,
     bill_number: Annotated[int, Path(ge=1)],
+    member: Annotated[str | None, Query(pattern=r"^[A-Z]\d{6}$")] = None,
 ) -> HTMLResponse:
-    """Return the bill tile: the bill, where it stands, and its official summaries."""
+    """Return the bill tile: the bill, where it stands, and its official summaries.
+
+    Opened from a member's votes, it names that member, so the tile also
+    says how they voted on the bill.
+    """
     bill = find_bill(conn, congress, bill_type, bill_number)
     if bill is None:
         return message(request, "That bill is not in our records yet.", 404)
 
-    return templates.TemplateResponse(request, "_bill.html", {"bill": bill})
+    official = find_official(conn, member) if member else None
+    member_votes = (
+        find_member_votes(conn, congress, bill_type, bill_number, member)
+        if official and member
+        else []
+    )
+    context = {"bill": bill, "official": official, "member_votes": member_votes}
+    return templates.TemplateResponse(request, "_bill.html", context)

@@ -332,7 +332,47 @@ def test_member_tile_shows_attendance_for_the_session(client, conn):
 
     tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
 
-    assert "Congress 119, session 2: voted in 3 of 4 roll calls (75.0%)" in tile
+    assert "Attendance: 75.0% (3/4 votes)" in tile
+
+
+def test_member_tile_shows_a_finished_year_s_pay_per_day_voted(client, conn):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, session=1)
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, session=1)
+
+    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+
+    assert "Attendance and Pay (Salary = $174,000/year)" in tile
+    assert (
+        "<strong>2025</strong> - Attendance: 100.0% (2/2 votes); Pay: about $87,000 per day"
+        in tile
+    )
+
+
+def test_member_tile_pays_a_leader_more(client, conn):
+    add_members(conn)
+    add(conn, seated(PAT_IN_OFFICE) | {"leadership_titles": ["Speaker of the House"]})
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, session=1)
+
+    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+
+    assert "(Salary = $223,500/year)" in tile
+    assert "Pay: about $223,500 per day" in tile
+
+
+def test_member_tile_compares_pay_with_the_minimum_wage_and_names_its_source(
+    client, conn
+):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+
+    assert (
+        "the federal minimum wage pays $58 a day, or just $15,080 a year, and"
+        " that's before taxes come out." in tile
+    )
+    assert 'href="https://www.congress.gov/crs-product/RL30064"' in tile
 
 
 def test_member_tile_lists_votes_newest_first_with_the_position(client, conn):
@@ -483,7 +523,7 @@ def test_a_vote_on_a_stored_bill_opens_the_bill_tile(client, conn):
 
     tile = client.get(f"/tiles/members/{PAT}").text
 
-    assert f'hx-get="{BILL}"' in tile
+    assert f'hx-get="{BILL}?member={PAT}"' in tile
     assert 'hx-target="#bill-tile"' in tile
 
 
@@ -733,3 +773,74 @@ def test_bill_tile_order_is_votes_then_plain_language_then_official(client, conn
     impact = tile.index("How this does you")
     official = tile.index("Official summaries")
     assert votes < plain < impact < official
+
+
+# How the member a bill was opened from voted on it.
+
+
+def test_bill_tile_opened_from_a_member_says_how_they_voted(client, conn):
+    add_pat(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 9, day=8, positions={PAT: "Nay"}, question="On Motion to Recommit")
+
+    tile = client.get(f"{BILL}?member={PAT}").text
+
+    assert '<details class="fold member-votes">' in tile
+    assert "<summary><h3>How Pat Example voted</h3></summary>" in tile
+    assert "Jan 8, 2026 · On Motion to Recommit: <strong>Nay</strong>" in tile
+    assert "Jan 5, 2026 · On Passage: <strong>Yea</strong>" in tile
+    assert tile.index("On Motion to Recommit: <strong>") < tile.index(
+        "On Passage: <strong>"
+    )
+
+
+def test_bill_tile_leaves_out_a_member_s_amendment_votes(client, conn):
+    add_pat(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={PAT: "Yea"})
+    add_vote(
+        conn, 8, day=6, positions={PAT: "Nay"}, question="On Agreeing to the Amendment"
+    )
+
+    tile = client.get(f"{BILL}?member={PAT}").text
+
+    assert "On Agreeing to the Amendment: <strong>" not in tile
+
+
+def test_bill_tile_opened_on_its_own_names_no_member(client, conn):
+    add_pat(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={PAT: "Yea"})
+
+    tile = client.get(BILL).text
+
+    assert "How Pat Example voted" not in tile
+
+
+def test_bill_tile_says_nothing_for_a_member_who_did_not_vote_on_it(client, conn):
+    add_pat(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={"T000002": "Yea"})
+
+    tile = client.get(f"{BILL}?member={PAT}").text
+
+    assert "member-votes" not in tile
+
+
+def test_bill_tile_says_nothing_for_someone_who_holds_no_seat(client, conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={PAT: "Yea"})
+
+    response = client.get(f"{BILL}?member={PAT}")
+
+    assert response.status_code == 200
+    assert "member-votes" not in response.text
+
+
+def test_bill_tile_refuses_a_member_that_is_not_a_bioguide_id(client, conn):
+    add_members(conn)
+    add_bill(conn)
+
+    assert client.get(f"{BILL}?member=<script>").status_code == 422

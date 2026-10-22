@@ -26,11 +26,13 @@ MIN_EXPECTED_MEMBERS = 500
 UPSERT_SQL = """
 INSERT INTO officials (
     bioguide_id, name, party, chamber, state, state_fips, district_code,
-    term_start, term_end, phone, office_address, website, contact_form, source
+    term_start, term_end, phone, office_address, website, contact_form,
+    leadership_titles, source
 )
 VALUES (
     %(bioguide_id)s, %(name)s, %(party)s, %(chamber)s, %(state)s, %(state_fips)s, %(district_code)s,
-    %(term_start)s, %(term_end)s, %(phone)s, %(office_address)s, %(website)s, %(contact_form)s, %(source)s
+    %(term_start)s, %(term_end)s, %(phone)s, %(office_address)s, %(website)s, %(contact_form)s,
+    %(leadership_titles)s, %(source)s
 )
 ON CONFLICT (bioguide_id)
 DO UPDATE SET
@@ -46,6 +48,7 @@ DO UPDATE SET
     office_address = EXCLUDED.office_address,
     website = EXCLUDED.website,
     contact_form = EXCLUDED.contact_form,
+    leadership_titles = EXCLUDED.leadership_titles,
     source = EXCLUDED.source,
     updated_at = now();
 """
@@ -75,8 +78,26 @@ def district_code_for(state: str, district: int) -> str:
     return f"{district:02d}"
 
 
-def to_row(member: dict) -> dict:
-    """Turn one member record into one row for the officials table."""
+def current_leadership_titles(member: dict, on_date: date) -> list[str]:
+    """Return the titles of the leadership roles a member holds on a date.
+
+    A role still held has no end date. One that has ended, or has not
+    started yet, is left out.
+    """
+    return [
+        role["title"]
+        for role in member.get("leadership_roles", [])
+        if date.fromisoformat(role["start"]) <= on_date
+        and ("end" not in role or date.fromisoformat(role["end"]) > on_date)
+    ]
+
+
+def to_row(member: dict, on_date: date | None = None) -> dict:
+    """Turn one member record into one row for the officials table.
+
+    on_date decides which leadership roles are current; it is today unless
+    a test names another day.
+    """
     term = member["terms"][-1]
     name = member["name"]
     state = term["state"]
@@ -102,6 +123,7 @@ def to_row(member: dict) -> dict:
         "office_address": term.get("address"),
         "website": term.get("url"),
         "contact_form": term.get("contact_form"),
+        "leadership_titles": current_leadership_titles(member, on_date or date.today()),
         "source": SOURCE,
     }
 

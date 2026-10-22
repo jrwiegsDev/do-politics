@@ -1,5 +1,7 @@
 """Tests for looking up a member's recent votes."""
 
+from datetime import date
+
 from helpers import add_bill, add_members, add_vote
 
 from app.votes import (
@@ -213,6 +215,12 @@ def test_policy_areas_cover_only_the_members_own_final_votes(conn):
     assert find_policy_areas(conn, PAT) == ["Health"]
 
 
+def counts(rows):
+    """Return each attendance row's session and counts, leaving out the dates."""
+    keys = ("session", "roll_calls", "votes_cast", "days_voted", "chamber_days")
+    return [tuple(row[key] for key in keys) for row in rows]
+
+
 def test_attendance_counts_everything_but_not_voting_as_taking_part(conn):
     add_members(conn)
     add_vote(conn, 1, day=5, positions={PAT: "Yea"})
@@ -221,7 +229,16 @@ def test_attendance_counts_everything_but_not_voting_as_taking_part(conn):
     add_vote(conn, 4, day=8, positions={PAT: "No"}, question="On Motion to Recommit")
 
     assert find_attendance(conn, PAT) == [
-        {"congress": 119, "session": 2, "roll_calls": 4, "votes_cast": 3}
+        {
+            "congress": 119,
+            "session": 2,
+            "chamber": "house",
+            "roll_calls": 4,
+            "votes_cast": 3,
+            "days_voted": 3,
+            "chamber_days": 4,
+            "last_vote_on": date(2026, 1, 8),
+        }
     ]
 
 
@@ -231,10 +248,7 @@ def test_attendance_has_a_row_for_each_session_newest_first(conn):
     add_vote(conn, 1, day=6, positions={PAT: "Not Voting"}, session=2)
     add_vote(conn, 2, day=7, positions={PAT: "Yea"}, session=2)
 
-    assert find_attendance(conn, PAT) == [
-        {"congress": 119, "session": 2, "roll_calls": 2, "votes_cast": 1},
-        {"congress": 119, "session": 1, "roll_calls": 1, "votes_cast": 1},
-    ]
+    assert counts(find_attendance(conn, PAT)) == [(2, 2, 1, 1, 2), (1, 1, 1, 1, 1)]
 
 
 def test_attendance_leaves_out_roll_calls_that_did_not_list_the_member(conn):
@@ -242,9 +256,47 @@ def test_attendance_leaves_out_roll_calls_that_did_not_list_the_member(conn):
     add_vote(conn, 1, day=5, positions={PAT: "Yea"})
     add_vote(conn, 2, day=6, positions={SAM: "Yea"})
 
-    assert find_attendance(conn, PAT) == [
-        {"congress": 119, "session": 2, "roll_calls": 1, "votes_cast": 1}
-    ]
+    assert counts(find_attendance(conn, PAT)) == [(2, 1, 1, 1, 2)]
+
+
+def test_two_votes_on_one_day_count_as_one_day(conn):
+    add_members(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 2, day=5, positions={PAT: "Nay"})
+
+    assert counts(find_attendance(conn, PAT)) == [(2, 2, 2, 1, 1)]
+
+
+def test_a_day_the_member_missed_counts_for_the_chamber_only(conn):
+    add_members(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 2, day=6, positions={PAT: "Not Voting", SAM: "Yea"})
+
+    assert counts(find_attendance(conn, PAT)) == [(2, 2, 1, 1, 2)]
+
+
+def test_the_other_chamber_s_days_do_not_count(conn):
+    add_members(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 2, day=6, positions={SAM: "Yea"}, chamber="senate")
+
+    rows = find_attendance(conn, PAT)
+
+    assert counts(rows) == [(2, 1, 1, 1, 1)]
+    assert rows[0]["last_vote_on"] == date(2026, 1, 5)
+
+
+def test_a_vote_late_at_night_counts_on_washington_s_day(conn):
+    add_members(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"})
+    # Noon UTC on January 6 less 9 hours is 3am UTC on January 6, which is
+    # 10pm on January 5 in Washington: the same day as the first vote.
+    conn.execute(
+        "UPDATE votes SET voted_at = voted_at - interval '9 hours' WHERE roll_number = 2"
+    )
+
+    assert counts(find_attendance(conn, PAT)) == [(2, 2, 2, 1, 1)]
 
 
 def test_member_with_no_roll_calls_has_no_attendance_rows(conn):

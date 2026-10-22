@@ -8,6 +8,7 @@ from helpers import last_run
 from ingest.officials import (
     DELETE_DEPARTED_SQL,
     UPSERT_SQL,
+    current_leadership_titles,
     district_code_for,
     load,
     read_officials,
@@ -84,8 +85,65 @@ def test_house_member_becomes_a_row_from_the_latest_term():
         "office_address": "100 Example House Office Building Washington DC 20515",
         "website": "https://example.house.gov",
         "contact_form": None,
+        "leadership_titles": [],
         "source": "legislators-current",
     }
+
+
+ON_DATE = date(2026, 10, 21)
+
+
+def with_roles(*roles):
+    """Give the made-up senator these leadership roles."""
+    return SENATOR | {"leadership_roles": list(roles)}
+
+
+def test_a_role_still_held_is_current():
+    member = with_roles({"title": "Senate Minority Whip", "start": "2025-01-03"})
+
+    assert current_leadership_titles(member, ON_DATE) == ["Senate Minority Whip"]
+
+
+def test_a_role_that_has_ended_or_not_started_is_left_out():
+    member = with_roles(
+        {"title": "Senate Majority Leader", "start": "2019-01-03", "end": "2021-01-03"},
+        {"title": "Speaker of the House", "start": "2027-01-03"},
+    )
+
+    assert current_leadership_titles(member, ON_DATE) == []
+
+
+def test_a_role_ends_on_its_end_date():
+    member = with_roles(
+        {"title": "Senate Majority Leader", "start": "2025-01-03", "end": "2026-10-21"}
+    )
+
+    assert current_leadership_titles(member, date(2026, 10, 20)) == [
+        "Senate Majority Leader"
+    ]
+    assert current_leadership_titles(member, ON_DATE) == []
+
+
+def test_every_current_role_is_kept():
+    member = with_roles(
+        {"title": "Senate Minority Leader", "start": "2025-01-03"},
+        {"title": "Senate Democratic Conference Chair", "start": "2025-01-03"},
+    )
+
+    assert current_leadership_titles(member, ON_DATE) == [
+        "Senate Minority Leader",
+        "Senate Democratic Conference Chair",
+    ]
+
+
+def test_a_member_with_no_roles_has_none():
+    assert current_leadership_titles(SENATOR, ON_DATE) == []
+
+
+def test_the_row_carries_the_current_roles():
+    member = with_roles({"title": "Senate Minority Whip", "start": "2025-01-03"})
+
+    assert to_row(member, ON_DATE)["leadership_titles"] == ["Senate Minority Whip"]
 
 
 def test_senator_has_no_district():

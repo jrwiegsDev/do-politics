@@ -16,6 +16,19 @@
   {% endif %}
 </dl>
 
+{# Opened from a member's votes: how that member voted on the bill, so the
+   answer sits right beside it. Folded at first, like the party votes. #}
+{% if official and member_votes %}
+<details class="fold member-votes">
+  <summary><h3>How {{ official.name }} voted</h3></summary>
+  <ul>
+    {% for vote in member_votes %}
+    <li>{{ vote.voted_at | vote_date }} · {{ vote.question }}: <strong>{{ vote.position }}</strong></li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
 {# Every roll call on the bill, newest first, so the top one shows where it
    stands. Written from the vote records, so it is never out of date. Folded
    at first so the plain-language text leads; opens with a click, with no

@@ -41,15 +41,33 @@ WHERE p.bioguide_id = %(bioguide_id)s
 ORDER BY b.policy_area;
 """
 
+# A vote's day is its date in Washington, where Congress sits. days_voted
+# counts the days the member cast at least one vote; chamber_days counts the
+# days their chamber held any roll call, and last_vote_on is the latest.
 FIND_ATTENDANCE_SQL = """
-SELECT v.congress, v.session,
-       count(*) AS roll_calls,
-       count(*) FILTER (WHERE p.position <> 'Not Voting') AS votes_cast
-FROM vote_positions p
-JOIN votes v ON v.id = p.vote_id
-WHERE p.bioguide_id = %(bioguide_id)s
-GROUP BY v.congress, v.session
-ORDER BY v.congress DESC, v.session DESC;
+WITH member_sessions AS (
+    SELECT v.congress, v.session, v.chamber,
+           count(*) AS roll_calls,
+           count(*) FILTER (WHERE p.position <> 'Not Voting') AS votes_cast,
+           count(DISTINCT (v.voted_at AT TIME ZONE 'America/New_York')::date)
+               FILTER (WHERE p.position <> 'Not Voting') AS days_voted
+    FROM vote_positions p
+    JOIN votes v ON v.id = p.vote_id
+    WHERE p.bioguide_id = %(bioguide_id)s
+    GROUP BY v.congress, v.session, v.chamber
+),
+chamber_sessions AS (
+    SELECT congress, session, chamber,
+           count(DISTINCT (voted_at AT TIME ZONE 'America/New_York')::date) AS chamber_days,
+           max((voted_at AT TIME ZONE 'America/New_York')::date) AS last_vote_on
+    FROM votes
+    GROUP BY congress, session, chamber
+)
+SELECT m.congress, m.session, m.chamber, m.roll_calls, m.votes_cast,
+       m.days_voted, c.chamber_days, c.last_vote_on
+FROM member_sessions m
+JOIN chamber_sessions c USING (congress, session, chamber)
+ORDER BY m.congress DESC, m.session DESC;
 """
 
 
@@ -107,7 +125,9 @@ def find_attendance(conn: psycopg.Connection, bioguide_id: str) -> list[dict]:
 
     roll_calls is how many roll calls listed the member, and votes_cast is
     how many of those they voted in. Every roll call counts, procedural ones
-    and quorum calls included. 'Present' counts as taking part.
+    and quorum calls included. 'Present' counts as taking part. days_voted
+    is how many days they voted on, out of the chamber_days their chamber
+    held roll calls, the last of them on last_vote_on.
     """
     params = {"bioguide_id": bioguide_id}
     with conn.cursor(row_factory=dict_row) as cur:

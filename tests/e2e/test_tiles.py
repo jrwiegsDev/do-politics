@@ -34,7 +34,7 @@ def test_choosing_a_name_opens_that_members_votes(page: Page):
 
     member = page.locator("#member-tile")
     expect(member.get_by_role("heading", name="Casey Rep")).to_be_visible()
-    expect(member).to_contain_text("voted in 1 of 1 roll calls")
+    expect(member).to_contain_text("Attendance: 100.0% (1/1 votes)")
     expect(member.locator(".vote-position")).to_have_text("Voted: Yea")
     expect(member.get_by_role("button", name="Example Act")).to_be_visible()
 

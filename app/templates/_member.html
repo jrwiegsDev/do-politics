@@ -33,17 +33,23 @@
     </div>
   </div>
 
-  <h3>Attendance</h3>
+  <h3>Attendance and Pay (Salary = {{ salary | dollars }}/year)</h3>
   {% if attendance %}
   <ul class="attendance">
     {% for row in attendance %}
     <li>
-      Congress {{ row.congress }}, session {{ row.session }}:
-      voted in {{ row.votes_cast }} of {{ row.roll_calls }} roll calls
-      ({{ "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%)
+      <strong>{{ row.year }}{% if not row.finished %} so far{% endif %}</strong> -
+      Attendance: {{ "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%
+      ({{ row.votes_cast }}/{{ row.roll_calls }} votes)
+      {%- if row.per_day %}; Pay: about {{ row.per_day | dollars }} per day{% endif %}
     </li>
     {% endfor %}
   </ul>
+  <p class="pay-compare">
+    A full-time job at the federal minimum wage pays {{ minimum_wage_day | dollars }}
+    a day, or just {{ minimum_wage_year | dollars }} a year, and that's before taxes
+    come out. <a href="{{ pay_source_url }}" rel="noopener">Pay source</a>
+  </p>
   {% else %}
   <p class="vote-none">No roll calls are on record for this member yet.</p>
   {% endif %}
