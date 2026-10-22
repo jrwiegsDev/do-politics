@@ -28,6 +28,7 @@ def official(
         "office_address": None,
         "website": None,
         "contact_form": None,
+        "leadership_titles": [],
         "source": "test",
     }
 

@@ -56,6 +56,16 @@ def test_one_official_is_found_by_bioguide_id(conn):
     )
 
 
+def test_one_official_comes_with_their_term_start_and_leadership_roles(conn):
+    add(conn, REP_13 | {"leadership_titles": ["Speaker of the House"]})
+
+    found = find_official(conn, "T000012")
+
+    assert found is not None
+    assert found["term_start"] == date(2025, 1, 3)
+    assert found["leadership_titles"] == ["Speaker of the House"]
+
+
 def test_an_id_nobody_holds_a_seat_under_finds_nothing(conn):
     add(conn, SENATOR_A)
 

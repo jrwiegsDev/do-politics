@@ -380,6 +380,13 @@ button.vote-title {
   margin: 0.125rem 0 0;
 }
 
+/* The minimum wage line under the pay, for comparison. */
+.pay-compare {
+  margin: 0.375rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
 .topic-filter {
   display: flex;
   align-items: center;
@@ -440,6 +447,24 @@ select {
 
 .bill-facts dd {
   margin: 0;
+}
+
+/* How the member a bill was opened from voted on it, set apart from the
+   bill's facts with the accent rule the plain-language text uses. */
+.member-votes {
+  margin-top: 1rem;
+  padding: 0.25rem 1rem 0.5rem;
+  border-left: 4px solid var(--accent);
+}
+
+.tile .member-votes h3 {
+  margin-top: 0.5rem;
+}
+
+.member-votes ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 /* A section that folds away under its heading. The heading sits on the

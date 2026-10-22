@@ -76,6 +76,20 @@ GROUP BY v.id
 ORDER BY v.voted_at DESC, v.roll_number DESC;
 """
 
+# How one member voted on each roll call on the bill, newest first, with
+# amendment votes left out as they are from the party counts.
+MEMBER_BILL_VOTES_SQL = """
+SELECT v.voted_at, v.question, v.result, p.position
+FROM vote_positions p
+JOIN votes v ON v.id = p.vote_id
+WHERE p.bioguide_id = %(bioguide_id)s
+  AND v.congress = %(congress)s
+  AND v.bill_type = %(bill_type)s
+  AND v.bill_number = %(bill_number)s
+  AND v.question NOT LIKE 'On Agreeing to the Amendment%%'
+ORDER BY v.voted_at DESC, v.roll_number DESC;
+"""
+
 
 def bill_label(bill_type: str, bill_number: int) -> str:
     """Return a bill's name as Congress writes it, such as 'H.R. 1' or 'S.J.Res. 12'."""
@@ -107,3 +121,21 @@ def find_bill(
         bill["votes"] = cur.execute(BILL_VOTES_SQL, params).fetchall()
 
     return bill
+
+
+def find_member_votes(
+    conn: psycopg.Connection,
+    congress: int,
+    bill_type: str,
+    bill_number: int,
+    bioguide_id: str,
+) -> list[dict]:
+    """Return how one member voted on each roll call on a bill, newest first."""
+    params = {
+        "congress": congress,
+        "bill_type": bill_type,
+        "bill_number": bill_number,
+        "bioguide_id": bioguide_id,
+    }
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(MEMBER_BILL_VOTES_SQL, params).fetchall()

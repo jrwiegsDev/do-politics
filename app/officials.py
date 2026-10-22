@@ -21,6 +21,7 @@ ORDER BY chamber DESC, name;
 FIND_OFFICIAL_SQL = """
 SELECT bioguide_id, name, party, chamber, state, district_code,
        phone, office_address, website, contact_form,
+       term_start, leadership_titles,
        p.bioguide_id IS NOT NULL AS has_photo, p.attribution AS photo_credit
 FROM officials
 LEFT JOIN member_photos AS p USING (bioguide_id)

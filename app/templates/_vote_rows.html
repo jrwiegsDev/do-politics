@@ -1,11 +1,12 @@
 {% for vote in votes %}
 <li class="vote">
   {# A vote on a stored bill opens the bill tile under the other tiles. A
-     nomination, or a bill not loaded yet, is plain text. show:top scrolls
-     the page so the top of the bill tile is in view. #}
+     nomination, or a bill not loaded yet, is plain text. member names whose
+     votes these are, so the bill tile can say how they voted. show:top
+     scrolls the page so the top of the bill tile is in view. #}
   {% if vote.bill %}
   <button type="button" class="vote-title"
-          hx-get="/tiles/bills/{{ vote.bill.congress }}/{{ vote.bill.bill_type }}/{{ vote.bill.bill_number }}"
+          hx-get="/tiles/bills/{{ vote.bill.congress }}/{{ vote.bill.bill_type }}/{{ vote.bill.bill_number }}?member={{ bioguide_id }}"
           hx-target="#bill-tile" hx-swap="innerHTML show:top">{{ vote.bill.title }}</button>
   {% else %}
   <div class="vote-title">{{ vote.title or vote.question }}</div>
