@@ -102,8 +102,10 @@ body {
 /* After a lookup the page is laid out to fit one screen: the greeting steps
    aside, the address form folds into one row, and once a member is chosen
    the officials and member tiles share a fixed height and scroll inside
-   themselves. When the bill tile opens, all three share the height. On a
-   short screen the clamp() minimums win and the page itself scrolls. */
+   themselves. When the bill tile opens, the two above it shrink a little and
+   the bill tile gets most of a screen of its own, since it holds the most
+   reading; the page scrolls down to it. On a short screen the clamp()
+   minimums win. */
 .page:has(#officials-tile:not(:empty)) .intro {
   display: none;
 }
@@ -132,9 +134,12 @@ body {
 }
 
 .tiles:has(#bill-tile:not(:empty)) #officials-tile,
-.tiles:has(#bill-tile:not(:empty)) #member-tile,
+.tiles:has(#bill-tile:not(:empty)) #member-tile {
+  height: clamp(22rem, 55vh, 40rem);
+}
+
 #bill-tile {
-  height: clamp(16rem, 36vh, 30rem);
+  height: clamp(20rem, 70vh, 52rem);
 }
 
 #officials-tile,
@@ -339,6 +344,42 @@ button.vote-title {
   padding: 0.125rem 0;
 }
 
+/* The member's name, contact line and attendance stay pinned to the top of
+   the tile while the votes scroll under them. The tile is the scrolling
+   box, so the block's negative margins take it out to the tile's edges and
+   its own padding puts the text back where it was. A sticky offset counts
+   from inside the tile's padding, so top matches that padding to pin the
+   block flush to the tile's top edge, with no strip for votes to show in. */
+.member-pinned {
+  position: sticky;
+  top: -1.25rem;
+  z-index: 1;
+  margin: -1.25rem -1.25rem 0;
+  padding: 1.25rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--tile);
+}
+
+.member-pinned .member-header {
+  align-items: flex-start;
+}
+
+.member-pinned h3 {
+  margin-top: 0.75rem;
+}
+
+/* Phone, website and contact form share one line, wrapping when narrow. */
+.contact-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  margin-top: 0.375rem;
+}
+
+.contact-office {
+  margin: 0.125rem 0 0;
+}
+
 .topic-filter {
   display: flex;
   align-items: center;
@@ -399,6 +440,33 @@ select {
 
 .bill-facts dd {
   margin: 0;
+}
+
+/* A section that folds away under its heading. The heading sits on the
+   same line as the arrow. */
+.fold {
+  margin-top: 1rem;
+}
+
+.fold > summary {
+  cursor: pointer;
+}
+
+.fold > summary h3 {
+  display: inline;
+}
+
+/* How the parties voted: one row per roll call, laid out like a member's
+   vote rows. */
+.party-votes {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.party-vote {
+  padding: 0.625rem 0;
+  border-top: 1px solid var(--line);
 }
 
 .summary {

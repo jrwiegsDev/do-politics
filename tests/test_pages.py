@@ -524,9 +524,7 @@ def test_bill_tile_shows_the_bill_its_sponsor_and_where_it_stands(client, conn):
     assert 'href="https://example.test/bill/9999"' in response.text
 
 
-def test_bill_tile_shows_summaries_newest_stage_first_with_only_the_newest_open(
-    client, conn
-):
+def test_bill_tile_shows_summaries_newest_stage_first_all_folded(client, conn):
     add_members(conn)
     add_bill(
         conn,
@@ -540,8 +538,8 @@ def test_bill_tile_shows_summaries_newest_stage_first_with_only_the_newest_open(
 
     assert tile.index("Last words.") < tile.index("First words.")
     assert "Introduced in House, Jan 15, 2025" in tile
-    assert tile.count('<details class="summary" open>') == 1
-    assert tile.count('<details class="summary">') == 1
+    assert '<details class="summary" open>' not in tile
+    assert tile.count('<details class="summary">') == 2
 
 
 def test_bill_tile_says_when_there_is_no_official_summary(client, conn):
@@ -585,6 +583,57 @@ def test_bill_tile_never_links_to_something_that_is_not_a_web_address(client, co
     tile = client.get(BILL).text
 
     assert "javascript:" not in tile
+
+
+def test_bill_tile_shows_how_each_party_voted(client, conn):
+    add_members(conn)
+    add_bill(conn)
+    parties = {"T000001": "R", "T000002": "D"}
+    add_vote(
+        conn, 7, day=5, positions={"T000001": "Yea", "T000002": "Nay"}, parties=parties
+    )
+
+    tile = client.get(BILL).text
+
+    assert "How the parties voted" in tile
+    assert "House" in tile
+    assert "Jan 5, 2026" in tile
+    assert "On Passage" in tile
+    assert "Republicans 1 yes, 0 no" in tile
+    assert "Democrats 0 yes, 1 no" in tile
+    assert "Roll call 7" in tile
+
+
+def test_party_votes_are_a_fold_that_starts_closed(client, conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={"T000001": "Yea"})
+
+    tile = client.get(BILL).text
+
+    assert '<details class="fold">' in tile
+    assert '<details class="fold" open>' not in tile
+    assert "<summary><h3>How the parties voted</h3></summary>" in tile
+
+
+def test_bill_tile_names_independents_only_when_one_voted(client, conn):
+    add_members(conn)
+    add_bill(conn)
+    add_vote(conn, 7, day=5, positions={"T000001": "Yea"}, parties={"T000001": "R"})
+
+    tile = client.get(BILL).text
+
+    assert "Republicans 1 yes, 0 no" in tile
+    assert "Independents" not in tile
+
+
+def test_bill_tile_has_no_party_section_without_a_vote(client, conn):
+    add_members(conn)
+    add_bill(conn)
+
+    tile = client.get(BILL).text
+
+    assert "How the parties voted" not in tile
 
 
 INTRODUCED = summary("00", date(2025, 1, 15), "Introduced in House", "CRS words.")
@@ -669,3 +718,18 @@ def test_bill_tile_refuses_a_malformed_bill(client, path):
 )
 def test_a_bill_is_named_the_way_congress_writes_it(bill_type, bill_number, label):
     assert bill_label(bill_type, bill_number) == label
+
+
+def test_bill_tile_order_is_votes_then_plain_language_then_official(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Plain words")
+    add_vote(conn, 7, day=5, positions={"T000001": "Yea"})
+
+    tile = client.get(BILL).text
+
+    votes = tile.index("How the parties voted")
+    plain = tile.index("In plain language")
+    impact = tile.index("How this does you")
+    official = tile.index("Official summaries")
+    assert votes < plain < impact < official

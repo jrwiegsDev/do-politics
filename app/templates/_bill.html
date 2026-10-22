@@ -16,6 +16,29 @@
   {% endif %}
 </dl>
 
+{# Every roll call on the bill, newest first, so the top one shows where it
+   stands. Written from the vote records, so it is never out of date. Folded
+   at first so the plain-language text leads; opens with a click, with no
+   script involved. #}
+{% if bill.votes %}
+<details class="fold">
+  <summary><h3>How the parties voted</h3></summary>
+  <ol class="party-votes">
+    {% for vote in bill.votes %}
+    <li class="party-vote">
+      <div class="vote-detail">{{ vote.chamber | title }} · {{ vote.voted_at | vote_date }} · Roll call {{ vote.roll_number }}</div>
+      <div class="vote-title">{{ vote.question }}: {{ vote.result }}</div>
+      <div class="party-tally">
+        Republicans {{ vote.r_yes }} yes, {{ vote.r_no }} no ·
+        Democrats {{ vote.d_yes }} yes, {{ vote.d_no }} no
+        {%- if vote.i_yes or vote.i_no %} · Independents {{ vote.i_yes }} yes, {{ vote.i_no }} no{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+</details>
+{% endif %}
+
 {# Shown only once a person has approved it, labelled as generated, and
    naming the official summary below that it was written from. #}
 {% if bill.generated %}
@@ -35,10 +58,10 @@
 {% endif %}
 
 <h3>Official summaries</h3>
-{# Newest stage first. Only the newest is open; the others fold away and
-   open with a click, with no script involved. #}
+{# Newest stage first, all folded away so the plain-language text above
+   leads. Each opens with a click, with no script involved. #}
 {% for summary in bill.summaries %}
-<details class="summary"{% if loop.first %} open{% endif %}>
+<details class="summary">
   <summary>{{ summary.action_desc }}, {{ summary.action_on | long_date }}</summary>
   <p class="summary-text">{{ summary.summary_text }}</p>
 </details>
