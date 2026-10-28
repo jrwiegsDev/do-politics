@@ -70,6 +70,12 @@ penalties. It does not cover the words for people and who they are. Describe \
 people in respectful, current language, such as "transgender" and "sex \
 assigned at birth", even where the CRS summary uses other terms.
 
+Nor does it cover legal drafting. Bills say "certain of the land" or "such \
+individuals" where everyday English says "some of the land", "certain \
+people" or "these people", so write it the everyday way, and give the number \
+instead when the CRS summary has one. Keep the limit the phrase carries: \
+some of the land is not all of it.
+
 Follow the editorial policy below. Every fact about what the bill does, \
 including every amount, date, condition and group of people, must come from \
 the CRS summary. If the summary does not say something about the bill, leave \
