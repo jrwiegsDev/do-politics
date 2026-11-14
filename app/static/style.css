@@ -34,7 +34,9 @@ body {
   transition: padding-top 0.4s ease;
 }
 
-.page:has(#officials-tile:not(:empty)) {
+/* After a lookup, and on the policy pages, the page starts near the top. */
+.page:has(#officials-tile:not(:empty)),
+.page:has(.policy) {
   padding-top: 2rem;
 }
 
@@ -51,11 +53,48 @@ body {
   color: var(--muted);
 }
 
+.site-header h1 a {
+  color: inherit;
+  text-decoration: none;
+}
+
 .site-footer {
   margin-top: 2rem;
   text-align: center;
   color: var(--muted);
   font-size: 0.875rem;
+}
+
+.site-footer a {
+  color: inherit;
+}
+
+/* The privacy policy and terms of use: one readable column of text. */
+.policy {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--tile);
+}
+
+.policy h2 {
+  margin-top: 0;
+}
+
+.policy h3 {
+  margin: 1.5rem 0 0.5rem;
+}
+
+.policy-date {
+  margin-top: -0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.policy li + li {
+  margin-top: 0.5rem;
 }
 
 /* The tiles. One column to start with. When the member tile holds anything,

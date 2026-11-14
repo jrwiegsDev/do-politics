@@ -30,6 +30,11 @@ from ingest.congress import today_in_washington
 # How many votes the member tile shows at a time.
 PAGE_SIZE = 20
 
+# Where visitors send questions about the privacy policy and terms of use.
+# While it is empty, the pages leave out their Questions section; it must be
+# set before launch.
+CONTACT_EMAIL = ""
+
 # Congress works on Eastern time, so that is the day a vote is said to be on.
 EASTERN = ZoneInfo("America/New_York")
 
@@ -107,6 +112,22 @@ def message(
 def index(request: Request) -> HTMLResponse:
     """Return the whole page: the greeting and the address tile."""
     return templates.TemplateResponse(request, "index.html")
+
+
+@router.get("/privacy")
+def privacy(request: Request) -> HTMLResponse:
+    """Return the privacy policy: what happens to information about a visitor."""
+    return templates.TemplateResponse(
+        request, "privacy.html", {"contact_email": CONTACT_EMAIL}
+    )
+
+
+@router.get("/terms")
+def terms(request: Request) -> HTMLResponse:
+    """Return the terms of use."""
+    return templates.TemplateResponse(
+        request, "terms.html", {"contact_email": CONTACT_EMAIL}
+    )
 
 
 @router.get("/tiles/clear")

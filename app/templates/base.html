@@ -10,11 +10,15 @@
 <body>
   <div class="page">
     <header class="site-header">
-      <h1>DoPolitics</h1>
+      <h1><a href="/">DoPolitics</a></h1>
     </header>
     {% block content %}{% endblock %}
     <footer class="site-footer">
-      <p>Addresses are used once to find a district and are never stored.</p>
+      <nav aria-label="Policies">
+        <a href="/privacy">Privacy</a> ·
+        <a href="/terms">Terms of Use</a> ·
+        <a href="https://github.com/jrwiegsDev/do-politics/blob/main/docs/editorial-policy.md" rel="noopener">Editorial policy</a>
+      </nav>
     </footer>
   </div>
 </body>

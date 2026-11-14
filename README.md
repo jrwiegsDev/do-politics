@@ -31,7 +31,7 @@ DoPolitics takes a street address and returns every federal official who represe
 
 ## Privacy
 
-Addresses are never stored. An address is geocoded, resolved to districts and discarded. It isn't cached, and it isn't logged.
+Addresses are never stored. An address is sent once to the Census Geocoder, resolved to districts and discarded. It isn't cached, it isn't logged, and it never goes into a URL. The site sets no cookies, runs no analytics and loads nothing from other sites. The full policy, including how IP addresses are handled (held in memory for about a minute by the rate limiter, and kept for 14 days in Render's request logs), is the site's [Privacy Policy](app/templates/privacy.html) at `/privacy`, alongside the [Terms of Use](app/templates/terms.html) at `/terms`.
 
 ## Summaries
 
@@ -473,6 +473,8 @@ The pages are built on the server by the same FastAPI app that serves the API, s
 | Method | Path | Returns |
 |---|---|---|
 | `GET` | `/` | The whole page: a greeting and the address form |
+| `GET` | `/privacy` | The privacy policy |
+| `GET` | `/terms` | The terms of use |
 | `POST` | `/tiles/officials` | The officials tile for an address, as a piece of HTML |
 | `GET` | `/tiles/clear` | Empty officials, member and bill tiles, for the Clear button |
 | `GET` | `/tiles/members/{bioguide_id}` | The member tile: contact details, attendance, a search box, a topic filter and the member's recent votes |

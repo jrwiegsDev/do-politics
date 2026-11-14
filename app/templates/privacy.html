@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy Policy · DoPolitics{% endblock %}
+
+{% block content %}
+<main class="policy">
+  <h2>Privacy Policy</h2>
+  <p class="policy-date">Last updated: November 14, 2026</p>
+
+  <p>
+    DoPolitics shows you who represents you in Congress and how they vote. To
+    do that, it needs your street address for a moment. This page says
+    everything that happens to information about you, in plain words.
+  </p>
+
+  <h3>Your street address</h3>
+  <ul>
+    <li>
+      When you look up your officials, your address is sent to the U.S. Census
+      Bureau's Geocoder, a free public government service, which turns it into
+      map coordinates. We use those to find your congressional district, then
+      discard both the address and the coordinates.
+    </li>
+    <li>
+      We never store your address. It is not saved in our database, written to
+      our logs, or kept in a cache. It never goes into a web address (URL), so it
+      doesn't end up in your browser history or in anyone's server logs.
+    </li>
+    <li>
+      The Census Bureau receives your address in order to answer the request.
+      What it does with it is covered by
+      <a href="https://www.census.gov/about/policies/privacy/privacy-policy.html" rel="noopener">its own privacy policy</a>.
+    </li>
+  </ul>
+
+  <h3>Your IP address</h3>
+  <ul>
+    <li>
+      To stop anyone from flooding the site with automated lookups, DoPolitics
+      counts how many lookups each IP address has made in the last minute. The
+      IP address is held only in the running program's memory, for about a
+      minute after your last lookup. It is never written to our database or
+      our logs.
+    </li>
+    <li>
+      Our host, Render, keeps a standard record of each request to the site for
+      14 days: the page asked for, the time, your IP address and your browser
+      type. It never includes your street address, which travels inside the
+      request itself, not in the page address.
+      <a href="https://render.com/privacy" rel="noopener">Render's privacy policy</a>
+      covers those records.
+    </li>
+  </ul>
+
+  <h3>What we don't do</h3>
+  <ul>
+    <li>No accounts, no cookies, no analytics, no tracking, and nothing stored in your browser.</li>
+    <li>
+      Your browser talks only to DoPolitics. Photos, scripts and styles all come
+      from this site, so no other company sees your visit through us.
+    </li>
+    <li>We don't sell, rent or share information about you. We don't keep any to sell.</li>
+  </ul>
+
+  <h3>AI-written summaries</h3>
+  <p>
+    The plain-language bill summaries are written ahead of time by Claude, an
+    AI model made by Anthropic, from the official summaries. Claude never
+    receives anything about visitors.
+    <a href="https://github.com/jrwiegsDev/do-politics/blob/main/docs/editorial-policy.md" rel="noopener">Our editorial policy</a>
+    says how the summaries are written and reviewed.
+  </p>
+
+  <h3>Changes to this policy</h3>
+  <p>
+    If this policy changes, the date at the top changes too, and
+    <a href="https://github.com/jrwiegsDev/do-politics/commits/main/app/templates/privacy.html" rel="noopener">every past version is public on GitHub</a>.
+  </p>
+
+  {% if contact_email %}
+  <h3>Questions</h3>
+  <p>
+    Email <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.
+  </p>
+  {% endif %}
+</main>
+{% endblock %}
