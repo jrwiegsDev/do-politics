@@ -56,18 +56,31 @@
 </div>
 
 <h3>Votes</h3>
-{# Choosing a topic asks the server for that topic's rows and puts them in
-   the list below. hx-include sends this form's own field with the request. #}
-<form class="topic-filter"
-      hx-get="/tiles/members/{{ bioguide_id }}/votes" hx-trigger="change"
+{# Typing a search or choosing a topic asks the server for the matching rows
+   and puts them in the list below. hx-include sends both fields together, so
+   a search keeps its topic and a topic keeps its search. The input event
+   fires on each keystroke and when the topic changes; the delay waits until
+   typing pauses, so one request goes out instead of one per letter. Listing
+   submit as a trigger means pressing Enter runs the search here instead of
+   reloading the page. #}
+<form class="vote-filters"
+      hx-get="/tiles/members/{{ bioguide_id }}/votes"
+      hx-trigger="input delay:300ms, submit"
       hx-include="this" hx-target="#vote-list" hx-swap="innerHTML">
-  <label for="topic">Topic</label>
-  <select id="topic" name="topic">
-    <option value="">All topics</option>
-    {% for area in topics %}
-    <option value="{{ area }}">{{ area }}</option>
-    {% endfor %}
-  </select>
+  <div class="vote-filter">
+    <label for="vote-search">Search</label>
+    <input type="search" id="vote-search" name="q" maxlength="200"
+           placeholder="Bill number or words in the title" autocomplete="off">
+  </div>
+  <div class="vote-filter">
+    <label for="topic">Topic</label>
+    <select id="topic" name="topic">
+      <option value="">All topics</option>
+      {% for area in topics %}
+      <option value="{{ area }}">{{ area }}</option>
+      {% endfor %}
+    </select>
+  </div>
 </form>
 
 <ul class="votes" id="vote-list">

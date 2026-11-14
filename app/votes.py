@@ -23,6 +23,10 @@ LEFT JOIN bills b
 WHERE p.bioguide_id = %(bioguide_id)s
   AND v.category = ANY(%(categories)s)
   AND (%(policy_area)s::text IS NULL OR b.policy_area = %(policy_area)s)
+  AND (%(bill_type)s::text IS NULL OR b.bill_type = %(bill_type)s)
+  AND (%(bill_number)s::int IS NULL OR b.bill_number = %(bill_number)s)
+  AND (%(words)s::text IS NULL
+       OR b.title_search @@ websearch_to_tsquery('english', %(words)s))
 ORDER BY v.voted_at DESC, v.roll_number DESC
 LIMIT %(limit)s OFFSET %(offset)s;
 """
@@ -92,18 +96,28 @@ def find_recent_votes(
     categories: list[str] | None = None,
     policy_area: str | None = None,
     offset: int = 0,
+    bill_type: str | None = None,
+    bill_number: int | None = None,
+    words: str | None = None,
 ) -> list[dict]:
     """Return a member's most recent votes, newest first, with their position on each.
 
     Unless other categories are asked for, only final votes on legislation
     and nominations are returned. Each vote carries the bill it is about,
     when that bill is stored. Naming a policy area keeps only votes on bills
-    in that area. The offset skips that many votes, for the page after the first.
+    in that area. A bill type and number keep only votes on that bill, and a
+    number alone matches a bill of any type. Words keep only votes on bills
+    whose title has them, matched by Postgres full-text search, so 'veteran'
+    also finds 'Veterans'. The offset skips that many votes, for the page
+    after the first.
     """
     params = {
         "bioguide_id": bioguide_id,
         "categories": categories or FINAL_CATEGORIES,
         "policy_area": policy_area,
+        "bill_type": bill_type,
+        "bill_number": bill_number,
+        "words": words,
         "limit": limit,
         "offset": offset,
     }

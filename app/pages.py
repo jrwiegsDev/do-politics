@@ -23,6 +23,7 @@ from app.pay import (
     pay_for_session,
     salary,
 )
+from app.search import MAX_LENGTH, read_search
 from app.votes import find_attendance, find_policy_areas, find_recent_votes
 
 # How many votes the member tile shows at a time.
@@ -61,18 +62,27 @@ templates.env.filters["bill_label"] = bill_label
 templates.env.filters["dollars"] = dollars
 
 
-def vote_page(conn: Conn, bioguide_id: str, topic: str | None, offset: int) -> dict:
+def vote_page(
+    conn: Conn, bioguide_id: str, topic: str | None, offset: int, search: str = ""
+) -> dict:
     """Return one page of a member's votes and where the next page starts.
 
     One more vote than a page holds is asked for. If it comes back there is
-    a next page, and the extra vote is left for it.
+    a next page, and the extra vote is left for it. The search, as typed, is
+    read into a bill number or words; see read_search.
     """
     votes = find_recent_votes(
-        conn, bioguide_id, PAGE_SIZE + 1, policy_area=topic, offset=offset
+        conn,
+        bioguide_id,
+        PAGE_SIZE + 1,
+        policy_area=topic,
+        offset=offset,
+        **read_search(search),
     )
     return {
         "bioguide_id": bioguide_id,
         "topic": topic,
+        "search": search,
         "votes": votes[:PAGE_SIZE],
         "next_offset": offset + PAGE_SIZE if len(votes) > PAGE_SIZE else None,
     }
@@ -192,14 +202,15 @@ def vote_rows(
     bioguide_id: BioguideId,
     topic: Annotated[str, Query(max_length=100)] = "",
     offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str, Query(max_length=MAX_LENGTH)] = "",
 ) -> HTMLResponse:
-    """Return a page of a member's votes as list rows, for a topic if one is named.
+    """Return a page of a member's votes as list rows, for a topic and search if given.
 
-    The topic and the offset arrive with every request, so the server keeps
-    nothing between one request and the next.
+    The topic, the search and the offset arrive with every request, so the
+    server keeps nothing between one request and the next.
     """
     # The dropdown's "All topics" choice sends an empty topic.
-    context = vote_page(conn, bioguide_id, topic or None, offset)
+    context = vote_page(conn, bioguide_id, topic or None, offset, q)
     return templates.TemplateResponse(request, "_vote_rows.html", context)
 
 

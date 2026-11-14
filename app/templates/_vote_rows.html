@@ -20,7 +20,7 @@
 {% if next_offset %}
 <li class="vote-more">
   <button type="button"
-          hx-get="/tiles/members/{{ bioguide_id }}/votes?topic={{ (topic or '') | urlencode }}&amp;offset={{ next_offset }}"
+          hx-get="/tiles/members/{{ bioguide_id }}/votes?topic={{ (topic or '') | urlencode }}&amp;q={{ (search or '') | urlencode }}&amp;offset={{ next_offset }}"
           hx-target="closest li" hx-swap="outerHTML">Show more votes</button>
 </li>
 {% endif %}

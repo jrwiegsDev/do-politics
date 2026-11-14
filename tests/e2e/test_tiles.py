@@ -103,3 +103,26 @@ def test_scrolling_past_the_top_of_a_tile_moves_the_page(page: Page):
 
     page.wait_for_function("top => window.scrollY < top", arg=page_top)
     assert bill.evaluate("tile => tile.scrollTop") == 0
+
+
+def test_typing_in_the_search_box_narrows_the_votes(page: Page):
+    look_up_the_capitol(page)
+    page.get_by_role("button", name="Casey Rep").click()
+    member = page.locator("#member-tile")
+    search = member.get_by_label("Search")
+    vote = member.get_by_role("button", name="Example Act")
+    expect(vote).to_be_visible()
+
+    search.fill("tariffs")
+    expect(member.get_by_text("No votes to show.")).to_be_visible()
+    expect(vote).to_be_hidden()
+
+    search.fill("")
+    expect(vote).to_be_visible()
+
+    # Enter runs the search in place; the page itself does not reload.
+    search.fill("example")
+    search.press("Enter")
+    expect(vote).to_be_visible()
+    expect(page).to_have_url(page.url.split("?")[0])
+    expect(member.get_by_role("heading", name="Casey Rep")).to_be_visible()
