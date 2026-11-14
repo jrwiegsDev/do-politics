@@ -22,6 +22,7 @@ from time import sleep
 
 from ingest.bills import fetch_json
 from ingest.db import connect
+from ingest.fetch import open_url
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
@@ -80,7 +81,7 @@ def download(url: str) -> bytes | None:
     """Download one image, or return None when the site has no file there."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with open_url(request, timeout=30) as response:
             # One byte more than allowed, so an image that is too large is
             # caught without reading the rest of it.
             data = response.read(MAX_BYTES + 1)

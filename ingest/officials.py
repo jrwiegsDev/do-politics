@@ -7,10 +7,10 @@ Usage:
 
 import argparse
 import json
-import urllib.request
 from datetime import date
 
 from ingest.db import connect
+from ingest.fetch import open_url
 from ingest.runs import record_run
 from ingest.states import FIPS_BY_POSTAL, NON_VOTING
 
@@ -66,7 +66,7 @@ def fetch() -> list[dict]:
     Unlike the district boundaries, this is never reused from disk: members
     resign and are sworn in between runs, so every run reads the latest file.
     """
-    with urllib.request.urlopen(LEGISLATORS_URL, timeout=30) as response:
+    with open_url(LEGISLATORS_URL, timeout=30) as response:
         return json.load(response)
 
 

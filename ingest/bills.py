@@ -24,6 +24,7 @@ from itertools import islice
 from time import sleep
 
 from ingest.db import connect
+from ingest.fetch import open_url
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
@@ -117,7 +118,7 @@ def fetch_json(path: str) -> dict:
             "User-Agent": USER_AGENT,
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with open_url(request, timeout=30) as response:
         return json.load(response)
 
 
