@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from helpers import add_bill, add_members, add_vote
+from helpers import add_bill, add_members, add_vote, summary
 
 from app.votes import (
     ALL_CATEGORIES,
@@ -183,6 +183,103 @@ def test_naming_a_policy_area_leaves_out_votes_with_no_stored_bill(conn):
     add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 7777")
 
     assert rolls(find_recent_votes(conn, PAT, policy_area="Energy")) == [1]
+
+
+def test_a_bill_type_and_number_keep_only_votes_on_that_bill(conn):
+    add_members(conn)
+    add_bill(conn, 9999)
+    add_bill(conn, 9999, bill_type="s", title="Senate Example Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="S 9999")
+
+    found = find_recent_votes(conn, PAT, bill_type="hr", bill_number=9999)
+
+    assert rolls(found) == [1]
+
+
+def test_a_number_alone_matches_a_bill_of_any_type(conn):
+    add_members(conn)
+    add_bill(conn, 9999)
+    add_bill(conn, 9999, bill_type="s", title="Senate Example Act")
+    add_bill(conn, 8888)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="S 9999")
+    add_vote(conn, 3, day=7, positions={PAT: "Yea"}, issue="H R 8888")
+
+    assert rolls(find_recent_votes(conn, PAT, bill_number=9999)) == [2, 1]
+
+
+def test_words_find_bills_by_title_in_any_form_of_the_word(conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Veterans' Benefits Expansion Act")
+    add_bill(conn, 8888, title="Energy Prices Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 8888")
+
+    assert rolls(find_recent_votes(conn, PAT, words="veteran")) == [1]
+    assert rolls(find_recent_votes(conn, PAT, words="BENEFIT")) == [1]
+    assert rolls(find_recent_votes(conn, PAT, words="energy price")) == [2]
+
+
+def test_every_word_must_be_in_the_title(conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    assert rolls(find_recent_votes(conn, PAT, words="veterans housing")) == []
+
+
+def test_a_minus_sign_leaves_out_a_word_and_quotes_keep_a_phrase(conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Clean Water Act")
+    add_bill(conn, 8888, title="Water Tax Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 8888")
+
+    assert rolls(find_recent_votes(conn, PAT, words="water -tax")) == [1]
+    assert rolls(find_recent_votes(conn, PAT, words='"water tax"')) == [2]
+
+
+def test_words_search_only_the_title_not_the_summaries(conn):
+    add_members(conn)
+    add_bill(
+        conn,
+        9999,
+        title="Example Act",
+        summaries=[summary("00", date(2025, 1, 15), "Introduced", "About tariffs.")],
+    )
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    assert rolls(find_recent_votes(conn, PAT, words="tariffs")) == []
+
+
+def test_words_leave_out_votes_with_no_stored_bill(conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Example Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 7777", title="Example")
+
+    assert rolls(find_recent_votes(conn, PAT, words="example")) == [1]
+
+
+def test_words_and_a_policy_area_must_both_match(conn):
+    add_members(conn)
+    add_bill(conn, 9999, policy_area="Health", title="Clean Water Act")
+    add_bill(conn, 8888, policy_area="Energy", title="Clean Energy Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 8888")
+
+    found = find_recent_votes(conn, PAT, words="clean", policy_area="Energy")
+
+    assert rolls(found) == [2]
+
+
+def test_words_that_are_only_common_words_match_nothing(conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="The Example Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    assert rolls(find_recent_votes(conn, PAT, words="the")) == []
 
 
 def test_policy_areas_come_once_each_in_alphabetical_order(conn):

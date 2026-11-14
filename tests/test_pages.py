@@ -446,7 +446,7 @@ def test_first_page_holds_twenty_votes_and_offers_more(client, conn):
     assert "Act 25<" in tile
     assert "Act 6<" in tile
     assert "Act 5<" not in tile
-    assert f"/tiles/members/{PAT}/votes?topic=&amp;offset=20" in tile
+    assert f"/tiles/members/{PAT}/votes?topic=&amp;q=&amp;offset=20" in tile
 
 
 def test_next_page_holds_the_rest_and_offers_no_more(client, conn):
@@ -493,7 +493,7 @@ def test_more_votes_for_a_topic_keep_the_topic(client, conn):
         f"/tiles/members/{PAT}/votes", params={"topic": "Crime and Law Enforcement"}
     ).text
 
-    assert "topic=Crime%20and%20Law%20Enforcement&amp;offset=20" in rows
+    assert "topic=Crime%20and%20Law%20Enforcement&amp;q=&amp;offset=20" in rows
 
 
 def test_an_empty_topic_means_all_topics(client, conn):
@@ -503,6 +503,72 @@ def test_an_empty_topic_means_all_topics(client, conn):
     rows = client.get(f"/tiles/members/{PAT}/votes", params={"topic": ""}).text
 
     assert rows.count('class="vote"') == 1
+
+
+def test_member_tile_has_a_search_box_beside_the_topics(client, conn):
+    add_pat(conn)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert '<label for="vote-search">Search</label>' in tile
+    assert 'type="search" id="vote-search" name="q"' in tile
+    assert "Bill number or words in the title" in tile
+    assert 'hx-trigger="input delay:300ms, submit"' in tile
+
+
+def test_vote_rows_for_a_search_hold_only_matching_bills(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+    add_bill(conn, 8888, title="Energy Prices Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 9999")
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="H R 8888")
+
+    for search in ("veteran", "H.R. 9999", "9999"):
+        rows = client.get(f"/tiles/members/{PAT}/votes", params={"q": search}).text
+
+        assert rows.count('class="vote"') == 1, search
+        assert "Veterans Benefits Act" in rows, search
+
+
+def test_a_search_with_no_match_says_so(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    rows = client.get(f"/tiles/members/{PAT}/votes", params={"q": "tariffs"}).text
+
+    assert 'class="vote"' not in rows
+    assert "No votes to show." in rows
+
+
+def test_more_votes_for_a_search_keep_the_search_and_topic(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999, policy_area="Health", title="Clean Water Act")
+    add_votes(conn, 21)
+
+    rows = client.get(
+        f"/tiles/members/{PAT}/votes", params={"q": "clean water", "topic": "Health"}
+    ).text
+
+    assert "topic=Health&amp;q=clean%20water&amp;offset=20" in rows
+
+
+def test_a_search_is_shown_as_text_and_never_as_html(client, conn):
+    add_pat(conn)
+    add_bill(conn, 9999)
+    add_votes(conn, 21)
+
+    rows = client.get(
+        f"/tiles/members/{PAT}/votes", params={"q": '"><script>alert(1)</script>'}
+    ).text
+
+    assert "<script>" not in rows
+
+
+def test_vote_rows_refuse_a_search_over_the_limit(client):
+    response = client.get(f"/tiles/members/{PAT}/votes", params={"q": "x" * 201})
+
+    assert response.status_code == 422
 
 
 def test_vote_rows_refuse_a_negative_offset(client):

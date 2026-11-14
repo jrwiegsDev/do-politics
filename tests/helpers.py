@@ -131,16 +131,24 @@ def summary(version_code, action_on, action_desc, text) -> dict:
     }
 
 
-def add_bill(conn, bill_number=9999, summaries=(), policy_area="Energy") -> None:
-    """Store a made-up House bill of the 119th Congress, sponsored by Pat Example.
+def add_bill(
+    conn,
+    bill_number=9999,
+    summaries=(),
+    policy_area="Energy",
+    title="Example Act",
+    bill_type="hr",
+) -> None:
+    """Store a made-up bill of the 119th Congress, sponsored by Pat Example.
 
-    The default number is the bill the made-up votes name ('H R 9999').
+    It is a House bill unless another type is given. The default number is
+    the bill the made-up votes name ('H R 9999').
     """
     bill = {
         "congress": 119,
-        "bill_type": "hr",
+        "bill_type": bill_type,
         "bill_number": bill_number,
-        "title": "Example Act",
+        "title": title,
         "policy_area": policy_area,
         "sponsor_bioguide_id": "T000001",
         "introduced_on": date(2025, 1, 15),
