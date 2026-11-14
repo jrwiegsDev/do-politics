@@ -1,15 +1,21 @@
 """The instructions Claude is given for every bill, and their version.
 
-The instructions are the task below followed by the published editorial
-policy, read from docs/editorial-policy.md, so the policy readers see is the
-policy Claude follows. A revision of approved text gets the same instructions
-plus REVISION_TASK.
+The instructions are the task below followed by the writing rules from the
+published editorial policy, the "How we write about a bill" section of
+docs/editorial-policy.md, so the rules readers see are the rules Claude
+follows. The policy's other sections (where the words come from, corrections)
+are about the site, not the writing, so editing them does not change the
+instructions or their version. A revision of approved text gets the same
+instructions plus REVISION_TASK.
 """
 
 import hashlib
 from pathlib import Path
 
 POLICY_FILE = Path(__file__).resolve().parent.parent / "docs" / "editorial-policy.md"
+
+# The heading of the one policy section Claude is given.
+WRITING_RULES_HEADING = "## How we write about a bill"
 
 TASK = """\
 You write for DoPolitics, a website that shows people how their members of \
@@ -108,9 +114,34 @@ mention the CRS summary, the text you were given, or your sources, and never \
 say what they leave out: your words have to stand on their own. Write \
 plain text with no headings, lists or markdown."""
 
-SYSTEM_PROMPT = (
-    f"{TASK}\n\n<editorial_policy>\n{POLICY_FILE.read_text()}</editorial_policy>"
-)
+
+def writing_rules(policy: str) -> str:
+    """Return the policy's "How we write about a bill" section, heading included.
+
+    The section runs to the next heading of the same level, or to the end.
+    A policy without that heading raises ValueError, so renaming it can never
+    quietly leave Claude without the rules.
+    """
+    lines = policy.splitlines()
+    try:
+        start = lines.index(WRITING_RULES_HEADING)
+    except ValueError:
+        raise ValueError(
+            f"{POLICY_FILE.name} has no {WRITING_RULES_HEADING!r} heading"
+        ) from None
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+        len(lines),
+    )
+    return "\n".join(lines[start:end]).strip() + "\n"
+
+
+def system_prompt(policy: str) -> str:
+    """Return the task followed by the policy's writing rules."""
+    return f"{TASK}\n\n<editorial_policy>\n{writing_rules(policy)}</editorial_policy>"
+
+
+SYSTEM_PROMPT = system_prompt(POLICY_FILE.read_text())
 
 REVISION_TASK = """\
 This time the text has already been written and approved. You will also get \
@@ -127,7 +158,7 @@ REVISION_SYSTEM_PROMPT = f"{SYSTEM_PROMPT}\n\n{REVISION_TASK}"
 def fingerprint(prompt: str) -> str:
     """Return a short fingerprint of a prompt.
 
-    Any edit to the task or the policy gives a new version, so every stored
+    Any edit to the task or the policy's writing rules gives a new version, so every stored
     answer names the exact instructions it was written under, and a changed
     prompt is never mistaken for one that already has answers.
     """

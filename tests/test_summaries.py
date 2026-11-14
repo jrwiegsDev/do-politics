@@ -249,6 +249,60 @@ def test_a_bill_rejected_under_another_prompt_is_written_again(conn):
     assert len(bills_to_write(conn, OPUS)) == 1
 
 
+# --new-only, which the nightly job uses: only bills with no generated
+# summary of any kind.
+
+
+def numbers(bills):
+    return [bill["bill_number"] for bill in bills]
+
+
+def test_new_only_keeps_only_bills_with_no_generated_summary(conn):
+    answered = add_bill_with(conn, INTRODUCED, number=9999)
+    store(conn, answered, "00", "older-prompt", answer(), Decimal("0.01"))
+    add_bill_with(conn, INTRODUCED, number=8888)
+
+    # Without it, the older prompt's draft counts as needing a new answer.
+    assert numbers(bills_to_write(conn, OPUS)) == [8888, 9999]
+    assert numbers(bills_to_write(conn, OPUS, new_only=True)) == [8888]
+
+
+@pytest.mark.parametrize("status", ["approved", "rejected"])
+def test_new_only_leaves_out_a_reviewed_bill_whatever_the_decision(conn, status):
+    bill_id = add_bill_with(conn, INTRODUCED)
+    store(conn, bill_id, "00", "older-prompt", answer(), Decimal("0.01"))
+    decide(conn, status, "A note.")
+
+    assert bills_to_write(conn, OPUS, new_only=True) == []
+
+
+def test_new_only_leaves_out_a_bill_whose_summary_moved_to_a_newer_stage(conn):
+    bill_id = add_bill_with(conn, INTRODUCED)
+    store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
+    add_bill(conn, 9999, summaries=[summary(*INTRODUCED), summary(*PASSED)])
+
+    assert len(bills_to_write(conn, OPUS)) == 1
+    assert bills_to_write(conn, OPUS, new_only=True) == []
+
+
+def test_new_only_and_named_bills_must_both_match(conn):
+    answered = add_bill_with(conn, INTRODUCED, number=9999)
+    store(conn, answered, "00", "older-prompt", answer(), Decimal("0.01"))
+    add_bill_with(conn, INTRODUCED, number=8888)
+    add_bill_with(conn, INTRODUCED, number=7777)
+
+    named = ["119/hr/9999", "119/hr/8888"]
+
+    assert numbers(bills_to_write(conn, OPUS, bills=named, new_only=True)) == [8888]
+
+
+def test_new_only_respects_the_limit(conn):
+    for number in (7777, 8888, 9999):
+        add_bill_with(conn, INTRODUCED, number=number)
+
+    assert numbers(bills_to_write(conn, OPUS, limit=2, new_only=True)) == [7777, 8888]
+
+
 def test_a_newer_summary_is_written_from_again(conn):
     bill_id = add_bill_with(conn, INTRODUCED)
     store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))

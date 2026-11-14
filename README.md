@@ -310,7 +310,7 @@ The load is idempotent: a bill is keyed on its Congress, type and number, and a 
 
 ### Generated summaries
 
-`ingest/summaries.py` asks Claude for two texts per bill, written from its newest CRS summary: a plain-language summary and a one-to-three-sentence "How this does you" callout. The instructions are in `ingest/prompt.py`, followed by the editorial policy read from `docs/editorial-policy.md`, so the policy readers see is the policy the model follows. Each answer is stored in `generated_summaries` (`migrations/versions/0009_generated_summaries.py`) as a draft, with the prompt version, the model, its token counts and what it cost.
+`ingest/summaries.py` asks Claude for two texts per bill, written from its newest CRS summary: a plain-language summary and a one-to-three-sentence "How this does you" callout. The instructions are in `ingest/prompt.py`, followed by the "How we write about a bill" section of `docs/editorial-policy.md`, so the writing rules readers see are the rules the model follows. The policy's other sections are about the site, not the writing, and are not sent. Each answer is stored in `generated_summaries` (`migrations/versions/0009_generated_summaries.py`) as a draft, with the prompt version, the model, its token counts and what it cost.
 
 The API key is read from `ANTHROPIC_API_KEY` in `.env`. Only these commands send requests, and only when run by hand or on a schedule; the web app never imports the Anthropic SDK, and a test checks that.
 
@@ -318,6 +318,7 @@ The API key is read from `ANTHROPIC_API_KEY` in `.env`. Only these commands send
 uv run --env-file .env python -m ingest.summaries estimate --limit 10
 uv run --env-file .env python -m ingest.summaries sample --bill 119/hr/498
 uv run --env-file .env python -m ingest.summaries submit --budget 6
+uv run --env-file .env python -m ingest.summaries sample --new-only --limit 20 --budget 1.50
 uv run --env-file .env python -m ingest.summaries collect msgbatch_...
 uv run --env-file .env python -m ingest.summaries review
 uv run --env-file .env python -m ingest.summaries review --previous
@@ -328,8 +329,9 @@ uv run --env-file .env python -m ingest.summaries revise
 - `sample` sends requests one at a time and prints each answer, for tuning the prompt.
 - `submit` sends them through the Batch API at half price, and `collect` stores the answers once the batch has ended.
 - `sample`, `submit` and `revise` refuse to send anything when the most it could cost is over `--budget` dollars.
+- `--new-only` keeps only bills that have no generated summary at all, of any prompt, model or status. It is what the nightly job runs, so new bills get a draft the next morning without an older prompt's drafts, a rejected bill, or a bill whose CRS summary moved to a newer stage being written again. Those stay a person's decision.
 
-**The prompt version.** It is a 12-character fingerprint of the full instructions, so any edit to the prompt or the policy gives a new version, and every stored answer names the exact instructions it was written under. A new version makes every bill due again, except a bill whose summary is already approved. Naming a bill with `--bill` writes it again anyway.
+**The prompt version.** It is a 12-character fingerprint of the full instructions, so any edit to the prompt or to the policy's writing rules gives a new version (an edit to another section of the policy does not), and every stored answer names the exact instructions it was written under. A new version makes every bill due again, except a bill whose summary is already approved. Naming a bill with `--bill` writes it again anyway.
 
 **Review.** `review` shows each draft beside the CRS summary it came from, one at a time, to approve, reject or skip, with an optional note. Each decision is saved as it is made. `review --previous` first walks the decisions of the last 7 days, newest first, so a mistake can be sent back to the drafts. Times are shown in the local time zone.
 

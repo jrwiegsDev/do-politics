@@ -8,6 +8,7 @@ Usage:
     uv run --env-file .env python -m ingest.summaries estimate --limit 10
     uv run --env-file .env python -m ingest.summaries sample --bill 119/hr/1
     uv run --env-file .env python -m ingest.summaries submit --budget 6
+    uv run --env-file .env python -m ingest.summaries sample --new-only --limit 20 --budget 1.50
     uv run --env-file .env python -m ingest.summaries collect msgbatch_...
     uv run --env-file .env python -m ingest.summaries revise
     uv run --env-file .env python -m ingest.summaries review --previous
@@ -17,11 +18,16 @@ cost. sample sends requests one at a time, for tuning the prompt and
 comparing models. submit sends them through the Batch API at half price, and
 collect stores the answers once the batch has ended. sample and submit refuse
 to send anything when the most it could cost is over --budget dollars.
+--new-only keeps only bills that have no generated summary at all, of any
+prompt, model or status, which is what the nightly job drafts: a bill that
+was rejected, or whose CRS summary has moved to a newer stage, is left for a
+person to redraft on purpose.
 
 A bill is written up from its newest CRS summary, once per prompt version and
 model. Each answer is stored as a draft. review shows the drafts one at a
-time beside the summary they came from, to approve or reject. Only approved
-text is ever shown on the site.
+time beside the summary they came from, to approve or reject. The site shows
+an approved summary in full, and a draft marked as not yet reviewed, without
+its "How this does you" text; a rejected one is never shown.
 
 An approval with no note means the text is final. An approval with a note
 means the text is live, but the note asks for a change: revise rewrites it,
@@ -116,6 +122,11 @@ WHERE (%(bills)s::text[] IS NULL
         AND g.prompt_version = %(prompt_version)s
         AND g.model = %(model)s
   )
+  -- With new_only, a bill that has any generated summary at all is left out:
+  -- a draft, an approval or a rejection, from any prompt, model or stage.
+  AND (NOT %(new_only)s OR NOT EXISTS (
+      SELECT 1 FROM generated_summaries n WHERE n.bill_id = b.id
+  ))
   -- A bill already approved for this CRS version is done, whatever prompt
   -- wrote it, unless it was named on purpose.
   AND (%(bills)s::text[] IS NOT NULL OR NOT EXISTS (
@@ -228,19 +239,26 @@ class OverBudget(Exception):
 
 
 def bills_to_write(
-    conn, model: str, limit: int | None = None, bills: list[str] | None = None
+    conn,
+    model: str,
+    limit: int | None = None,
+    bills: list[str] | None = None,
+    new_only: bool = False,
 ) -> list[dict]:
     """Return the bills whose newest CRS summary has no answer yet from this prompt and model.
 
     A bill with an approved summary of that CRS version is left out. bills
     narrows the list to those named, such as ['119/hr/1'], and a bill named
     there is returned even if approved, so it can be rewritten on purpose.
+    new_only keeps only bills with no generated summary of any kind, so an
+    older prompt's drafts and rejections are never written again by accident.
     """
     params = {
         "model": model,
         "prompt_version": PROMPT_VERSION,
         "limit": limit,
         "bills": bills,
+        "new_only": new_only,
     }
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(BILLS_TO_WRITE_SQL, params).fetchall()
@@ -687,6 +705,12 @@ def main() -> None:
             help="only this bill, such as 119/hr/1; give it more than once for more",
         )
         command.add_argument(
+            "--new-only",
+            action="store_true",
+            help="only bills with no generated summary at all, of any prompt, "
+            "model or status",
+        )
+        command.add_argument(
             "--budget",
             type=float,
             default=DEFAULT_BUDGET,
@@ -739,7 +763,7 @@ def main() -> None:
                 raise SystemExit(str(exc)) from None
             return
 
-        bills = bills_to_write(conn, args.model, args.limit, args.bill)
+        bills = bills_to_write(conn, args.model, args.limit, args.bill, args.new_only)
         print(f"Prompt version {PROMPT_VERSION}, model {args.model}.")
         try:
             if args.command == "estimate":
