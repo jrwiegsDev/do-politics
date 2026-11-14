@@ -1,6 +1,6 @@
-"""Tests for working out the Congress and session from a date."""
+"""Tests for working out the Congress and session from a date, and today in Washington."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -9,6 +9,7 @@ from ingest.congress import (
     previous_session,
     session_year,
     sessions_to_check,
+    today_in_washington,
 )
 
 
@@ -54,3 +55,34 @@ def test_the_session_before_a_first_session_is_in_the_congress_before():
 
 def test_a_run_checks_the_earlier_session_and_then_the_current_one():
     assert sessions_to_check(date(2027, 1, 5)) == [(119, 2), (120, 1)]
+
+
+class FrozenClock(datetime):
+    """A datetime whose now() always gives the same instant, converted to the zone asked for."""
+
+    instant = datetime(2027, 1, 3, 0, 0, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.instant.astimezone(tz)
+
+
+@pytest.mark.parametrize(
+    ("instant", "expected"),
+    [
+        # 7 p.m. Eastern on January 2 is already January 3 in UTC, the day
+        # the 120th Congress is seated. Washington is still on January 2.
+        (datetime(2027, 1, 3, 0, 0, tzinfo=UTC), date(2027, 1, 2)),
+        # New Year's Eve, 8 p.m. Eastern: already the new year in UTC.
+        (datetime(2027, 1, 1, 1, 0, tzinfo=UTC), date(2026, 12, 31)),
+        # Midnight in Washington: the new day has begun there too.
+        (datetime(2027, 1, 3, 5, 0, tzinfo=UTC), date(2027, 1, 3)),
+        # Daylight saving time: 8 p.m. Eastern in July is midnight UTC.
+        (datetime(2026, 7, 5, 0, 0, tzinfo=UTC), date(2026, 7, 4)),
+    ],
+)
+def test_today_is_washington_s_date_not_the_server_s(monkeypatch, instant, expected):
+    monkeypatch.setattr(FrozenClock, "instant", instant)
+    monkeypatch.setattr("ingest.congress.datetime", FrozenClock)
+
+    assert today_in_washington() == expected

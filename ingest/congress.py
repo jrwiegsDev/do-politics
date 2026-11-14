@@ -1,8 +1,23 @@
-"""Work out which Congress and session a date falls in."""
+"""Work out which Congress and session a date falls in, and what day it is in Washington."""
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 FIRST_CONGRESS_YEAR = 1789
+
+# Congress sits in Washington, so its days begin and end on Eastern time.
+WASHINGTON = ZoneInfo("America/New_York")
+
+
+def today_in_washington() -> date:
+    """Return today's date in Washington, whatever time zone the server runs in.
+
+    date.today() reads the server's own clock. Render's servers run on UTC,
+    which is already tomorrow in Washington from 7 or 8 p.m. Eastern, so the
+    district maps, the officials in office and the year a member's pay counts
+    toward would all change hours early.
+    """
+    return datetime.now(WASHINGTON).date()
 
 
 def congress_for(day: date) -> tuple[int, int]:

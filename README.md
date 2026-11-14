@@ -505,7 +505,7 @@ uv run --env-file .env pytest
 
 The tests need the database container running. They never touch the development database: the setup in `tests/conftest.py` creates a separate `dopolitics_test` database, builds its schema with the Alembic migrations, loads Illinois's districts with the real loader, and drops the database when the run finishes. Each run therefore also checks that the migrations build a working schema from nothing. The officials and members tests use made-up members rather than the live files, so they don't fail when a real member leaves office. The votes tests use made-up roll calls in each chamber's real layout, and the bills tests a made-up bill in the layout Congress.gov sends, so none needs an API key. The geocoder, API and page tests replace the call to the Census with canned answers, so no test depends on the network or sends an address anywhere.
 
-GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development.
+GitHub Actions runs the same steps on every push and pull request (`.github/workflows/ci.yml`), using the same Docker image as local development. CI runs on UTC, as Render's servers do. Code never asks the server for today's date: `today_in_washington()` in `ingest/congress.py` gives the date in Washington, since UTC is already tomorrow there from 7 or 8 p.m. Eastern, and a test pins the clock at those hours.
 
 To see which lines no test runs, add `--cov`:
 

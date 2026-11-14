@@ -4,6 +4,8 @@ from datetime import date
 
 import psycopg
 
+from ingest.congress import today_in_washington
+
 FIND_DISTRICT_SQL = """
 SELECT state_fips, code, name
 FROM districts
@@ -23,6 +25,6 @@ def find_district(
     params = {
         "longitude": longitude,
         "latitude": latitude,
-        "on_date": on_date or date.today(),
+        "on_date": on_date or today_in_washington(),
     }
     return conn.execute(FIND_DISTRICT_SQL, params).fetchone()
