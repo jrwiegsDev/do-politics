@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Terms of Use · DoPolitics{% endblock %}
+
+{% block content %}
+<main class="policy">
+  <h2>Terms of Use</h2>
+  <p class="policy-date">Last updated: November 14, 2026</p>
+
+  <p>By using DoPolitics, you agree to these terms. They are short.</p>
+
+  <h3>What DoPolitics is</h3>
+  <p>
+    A free site that shows who represents an address in Congress, how they have
+    voted, and what the bills they voted on do. DoPolitics is openly
+    progressive, and
+    <a href="https://github.com/jrwiegsDev/do-politics/blob/main/docs/editorial-policy.md" rel="noopener">our editorial policy</a>
+    says how we write about bills.
+  </p>
+
+  <h3>Check before you rely on it</h3>
+  <ul>
+    <li>
+      The information comes from official sources: the Census Bureau,
+      Congress.gov, the House Clerk, the Senate, and the public
+      congress-legislators project. We update it regularly, but it can be out
+      of date or wrong. Check the official source, linked throughout the site,
+      before you rely on something.
+    </li>
+    <li>
+      Plain-language summaries are written by an AI model. A summary marked
+      "Not yet reviewed by human eyes" has not been checked by a person yet.
+      The official summary always appears below it.
+    </li>
+    <li>Nothing on DoPolitics is legal advice.</li>
+  </ul>
+
+  <h3>Using the site</h3>
+  <ul>
+    <li>Use DoPolitics for any lawful purpose, as often as you like.</li>
+    <li>
+      Don't flood it with automated requests or try to break it. The site
+      limits how many lookups one visitor can make each minute, so it stays
+      working for everyone.
+    </li>
+    <li>
+      If you want the data in bulk, the sources above publish it, and the code
+      that gathers it is public on
+      <a href="https://github.com/jrwiegsDev/do-politics" rel="noopener">GitHub</a>.
+    </li>
+  </ul>
+
+  <h3>No warranty</h3>
+  <p>
+    DoPolitics is provided as is, without any warranty. To the extent the law
+    allows, DoPolitics and the people who make it are not responsible for any
+    loss that comes from using it.
+  </p>
+
+  <h3>Changes to these terms</h3>
+  <p>
+    If these terms change, the date at the top changes too, and
+    <a href="https://github.com/jrwiegsDev/do-politics/commits/main/app/templates/terms.html" rel="noopener">every past version is public on GitHub</a>.
+  </p>
+
+  {% if contact_email %}
+  <h3>Questions</h3>
+  <p>
+    Email <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.
+  </p>
+  {% endif %}
+</main>
+{% endblock %}

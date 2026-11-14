@@ -76,11 +76,83 @@ def test_each_address_field_tells_the_browser_what_it_holds(client, name, autoco
     assert f'autocomplete="{autocomplete}"' in page
 
 
-def test_front_page_asks_no_other_site_for_anything(client):
-    page = client.get("/").text
+@pytest.mark.parametrize("path", ["/", "/privacy", "/terms"])
+def test_a_page_loads_nothing_from_another_site(client, path):
+    # Scripts, images and stylesheets come from our own folder, so loading a
+    # page tells no other site about the visit. A link the visitor chooses to
+    # follow, such as the editorial policy on GitHub, is not a request.
+    page = client.get(path).text
 
     assert 'src="http' not in page
-    assert 'href="http' not in page
+    assert '<link rel="stylesheet" href="http' not in page
+    assert "@import" not in page
+
+
+def test_every_page_links_to_the_privacy_policy_and_terms(client):
+    for path in ("/", "/privacy", "/terms"):
+        page = client.get(path).text
+
+        assert 'href="/privacy">Privacy</a>' in page, path
+        assert 'href="/terms">Terms of Use</a>' in page, path
+        assert "editorial-policy.md" in page, path
+
+
+def test_the_footer_no_longer_carries_the_address_line(client):
+    page = client.get("/").text
+
+    assert "never stored" not in page
+
+
+def test_privacy_policy_says_where_the_address_goes_and_what_is_kept(client):
+    page = " ".join(client.get("/privacy").text.split())
+
+    assert "<h2>Privacy Policy</h2>" in page
+    assert "Census Bureau's Geocoder" in page
+    assert "We never store your address." in page
+    assert "for about a minute" in page
+    assert "for 14 days" in page
+    assert "No accounts, no cookies, no analytics, no tracking" in page
+
+
+def test_terms_of_use_say_to_check_official_sources(client):
+    page = " ".join(client.get("/terms").text.split())
+
+    assert "<h2>Terms of Use</h2>" in page
+    assert "Check the official source" in page
+    assert "Not yet reviewed by human eyes" in page
+    assert "Nothing on DoPolitics is legal advice." in page
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_policy_pages_point_nobody_to_github_issues(client, path):
+    page = client.get(path).text
+
+    assert "/issues" not in page
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_policy_pages_leave_out_questions_until_a_contact_email_is_set(client, path):
+    page = client.get(path).text
+
+    assert "<h3>Questions</h3>" not in page
+    assert "mailto:" not in page
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_policy_pages_give_the_contact_email_once_it_is_set(client, monkeypatch, path):
+    monkeypatch.setattr("app.pages.CONTACT_EMAIL", "privacy@example.test")
+
+    page = client.get(path).text
+
+    assert "<h3>Questions</h3>" in page
+    assert 'href="mailto:privacy@example.test">privacy@example.test</a>' in page
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_policy_pages_have_their_own_title(client, path):
+    page = client.get(path).text
+
+    assert "· DoPolitics</title>" in page
 
 
 def test_stylesheet_and_script_are_served_from_our_own_folder(client):
