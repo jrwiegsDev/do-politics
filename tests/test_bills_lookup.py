@@ -111,8 +111,9 @@ def test_a_bill_that_is_not_stored_is_none(conn):
     assert find_bill(conn, 118, "hr", 9999) is None
 
 
-# Generated summaries. The rule: show the newest approved row, and only beside
-# the official summary it was written from.
+# Generated summaries. The rule: show the newest approved row, or with none
+# approved the newest draft, never a rejected row, and only beside the
+# official summary it was written from. A draft comes without its impact.
 
 
 def generated_text(conn) -> str | None:
@@ -127,6 +128,7 @@ def test_an_approved_summary_comes_with_the_stage_it_was_written_from(conn):
     add_generated(conn, "Plain words")
 
     assert stored(conn)["generated"] == {
+        "reviewed": True,
         "plain_summary": "Plain words",
         "impact": "How Plain words does you.",
         "source_action_desc": "Introduced in House",
@@ -134,13 +136,54 @@ def test_an_approved_summary_comes_with_the_stage_it_was_written_from(conn):
     }
 
 
-@pytest.mark.parametrize("status", ["draft", "rejected"])
-def test_a_summary_nobody_has_approved_is_not_shown(conn, status):
+def test_a_draft_is_shown_as_not_reviewed_and_without_its_impact(conn):
     add_members(conn)
     add_bill(conn, summaries=[INTRODUCED])
-    add_generated(conn, "Plain words", status)
+    add_generated(conn, "Plain words", "draft")
+
+    assert stored(conn)["generated"] == {
+        "reviewed": False,
+        "plain_summary": "Plain words",
+        "impact": None,
+        "source_action_desc": "Introduced in House",
+        "source_action_on": date(2025, 1, 15),
+    }
+
+
+def test_a_rejected_summary_is_never_shown(conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Plain words", "rejected")
 
     assert stored(conn)["generated"] is None
+
+
+def test_an_approved_summary_wins_over_a_newer_draft(conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Approved words", prompt_version="prompt-1")
+    add_generated(conn, "Draft words", "draft", prompt_version="prompt-2", minute=1)
+
+    assert generated_text(conn) == "Approved words"
+    assert stored(conn)["generated"]["reviewed"] is True
+
+
+def test_the_newest_draft_shows_when_none_is_approved(conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Older draft", "draft", prompt_version="prompt-1")
+    add_generated(conn, "Newer draft", "draft", prompt_version="prompt-2", minute=1)
+
+    assert generated_text(conn) == "Newer draft"
+
+
+def test_a_newer_rejected_summary_leaves_the_draft_before_it_showing(conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Draft words", "draft", prompt_version="prompt-1")
+    add_generated(conn, "Rejected", "rejected", prompt_version="prompt-2", minute=1)
+
+    assert generated_text(conn) == "Draft words"
 
 
 def test_an_approved_revision_replaces_the_row_it_revises(conn):

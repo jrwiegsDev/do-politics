@@ -707,15 +707,51 @@ def test_an_approved_summary_is_labelled_as_generated_with_its_source(client, co
     assert f'href="{POLICY}"' in tile
 
 
-@pytest.mark.parametrize("status", ["draft", "rejected"])
-def test_bill_tile_never_shows_a_summary_nobody_approved(client, conn, status):
+def test_bill_tile_shows_a_draft_marked_as_not_yet_reviewed(client, conn):
     add_members(conn)
     add_bill(conn, summaries=[INTRODUCED])
-    add_generated(conn, "Unreviewed words", status)
+    add_generated(conn, "Draft words", "draft")
+
+    tile = " ".join(client.get(BILL).text.split())
+
+    assert "In plain language" in tile
+    assert "Draft words" in tile
+    assert "Not yet reviewed by human eyes." in tile
+    assert tile.index("Not yet reviewed") < tile.index("Draft words")
+    assert "Written by Claude, an AI model, from the official summary below" in tile
+    assert "(Introduced in House, Jan 15, 2025)." in tile
+    assert "reviewed by DoPolitics" not in tile
+
+
+def test_bill_tile_keeps_how_this_does_you_back_until_a_draft_is_approved(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Draft words", "draft")
 
     tile = client.get(BILL).text
 
-    assert "Unreviewed words" not in tile
+    assert "How Draft words does you." not in tile
+    assert "<h4>How this does you</h4>" not in tile
+
+
+def test_an_approved_summary_has_no_unreviewed_notice(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Plain words")
+
+    tile = client.get(BILL).text
+
+    assert "Not yet reviewed" not in tile
+
+
+def test_bill_tile_never_shows_a_rejected_summary(client, conn):
+    add_members(conn)
+    add_bill(conn, summaries=[INTRODUCED])
+    add_generated(conn, "Rejected words", "rejected")
+
+    tile = client.get(BILL).text
+
+    assert "Rejected words" not in tile
     assert "In plain language" not in tile
     assert "CRS words." in tile
 
