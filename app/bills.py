@@ -1,4 +1,4 @@
-"""Find a bill, its summaries, its approved generated summary, and its votes."""
+"""Find a bill, its summaries, its plain-language summary, and its votes."""
 
 from typing import Literal
 
@@ -37,20 +37,26 @@ WHERE bill_id = %(bill_id)s
 ORDER BY action_on DESC, version_code DESC;
 """
 
-# The newest approved row is the end of its revision chain: a revision is
-# always written after the row it revises, and a draft or rejected revision
-# leaves the row before it showing. The inner join hides a generated summary
-# whose official summary is gone, since it is only shown beside its source.
+# An approved row always wins over a draft, and a rejected row is never shown.
+# Among approved rows the newest is the end of its revision chain: a revision
+# is always written after the row it revises, so a draft or rejected revision
+# leaves the approved row before it showing. With nothing approved, the newest
+# draft shows, labelled as not yet reviewed. A draft's impact is never read
+# out of the database, so "How this does you" cannot reach the page before a
+# person approves it. The inner join hides a generated summary whose official
+# summary is gone, since it is only shown beside its source.
 GENERATED_SUMMARY_SQL = """
-SELECT g.plain_summary, g.impact,
+SELECT g.status = 'approved' AS reviewed,
+       g.plain_summary,
+       CASE WHEN g.status = 'approved' THEN g.impact END AS impact,
        s.action_desc AS source_action_desc, s.action_on AS source_action_on
 FROM generated_summaries g
 JOIN bill_summaries s
   ON s.bill_id = g.bill_id AND s.version_code = g.source_version_code
 WHERE g.bill_id = %(bill_id)s
   AND g.source = 'crs_summary'
-  AND g.status = 'approved'
-ORDER BY g.generated_at DESC, g.id DESC
+  AND g.status IN ('approved', 'draft')
+ORDER BY g.status = 'approved' DESC, g.generated_at DESC, g.id DESC
 LIMIT 1;
 """
 
@@ -102,8 +108,10 @@ def find_bill(
     """Return a bill with its official summaries, newest stage first.
 
     Returns None when the bill is not stored. A bill with no official
-    summary has an empty list. 'generated' holds the approved plain-language
-    summary and the stage it was written from, or None when none is approved.
+    summary has an empty list. 'generated' holds the plain-language summary
+    to show and the stage it was written from, or None when there is none:
+    'reviewed' says whether a person approved it, and 'impact' is None until
+    one has.
     'votes' holds each roll call on the bill, newest first, with how many
     members of each party voted yes and no.
     """

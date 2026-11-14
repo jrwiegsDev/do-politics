@@ -52,19 +52,28 @@
 </details>
 {% endif %}
 
-{# Shown only once a person has approved it, labelled as generated, and
-   naming the official summary below that it was written from. #}
+{# Labelled as generated and naming the official summary below that it was
+   written from. A draft nobody has reviewed yet says so before the reader
+   starts, and "How this does you" waits until a person approves it. #}
 {% if bill.generated %}
 <div class="generated">
   <h3>In plain language</h3>
+  {% if not bill.generated.reviewed %}
+  <p class="unreviewed-notice">
+    <strong>Not yet reviewed by human eyes.</strong>
+    "How this does you" appears once DoPolitics approves this summary.
+  </p>
+  {% endif %}
   <p class="generated-text">{{ bill.generated.plain_summary }}</p>
+  {% if bill.generated.reviewed %}
   <h4>How this does you</h4>
   <p class="generated-text">{{ bill.generated.impact }}</p>
+  {% endif %}
   <p class="generated-label">
     Written by Claude, an AI model, from the official summary below
     ({{ bill.generated.source_action_desc }},
-    {{ bill.generated.source_action_on | long_date }}), and reviewed by
-    DoPolitics before it appeared.
+    {{ bill.generated.source_action_on | long_date }}){% if bill.generated.reviewed %}, and reviewed by
+    DoPolitics before it appeared{% endif %}.
     <a href="https://github.com/jrwiegsDev/do-politics/blob/main/docs/editorial-policy.md" rel="noopener">Read our editorial policy</a>
   </p>
 </div>

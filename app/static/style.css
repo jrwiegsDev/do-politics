@@ -7,6 +7,8 @@
   --tile: #ffffff;
   --line: #d9d5cb;
   --accent: #1d4ed8;
+  --caution: #b45309;
+  --caution-bg: #fff7e0;
   --radius: 10px;
 }
 
@@ -539,6 +541,17 @@ select {
 
 .generated-text {
   margin: 0;
+}
+
+/* A draft nobody has reviewed yet says so above its text, in a warm color
+   apart from the blue of an approved summary. */
+.unreviewed-notice {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid var(--caution);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--caution-bg);
+  font-size: 0.9375rem;
 }
 
 .generated-label {

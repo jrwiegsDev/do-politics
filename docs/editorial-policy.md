@@ -5,7 +5,7 @@ DoPolitics is openly progressive. This page says how the site writes about bills
 ## Where the words come from
 
 - **Official summaries.** Each bill shows the summaries written by the Congressional Research Service (CRS), the nonpartisan research office of the Library of Congress, exactly as published, with a link to the bill on Congress.gov.
-- **Plain-language summaries and "How this does you."** These are written by Claude, an AI model made by Anthropic, from the CRS summary shown beside them. Every one is read and approved by DoPolitics before it appears, and each is labelled as generated.
+- **Plain-language summaries and "How this does you."** These are written by Claude, an AI model made by Anthropic, from the CRS summary shown beside them, and each is labelled as generated. A plain-language summary can appear before DoPolitics has read it, marked "Not yet reviewed by human eyes." "How this does you" appears only after DoPolitics has read and approved the summary.
 
 ## How we write about a bill
 
