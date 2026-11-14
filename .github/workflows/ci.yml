@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# Render's servers run on UTC. Running every job on UTC too means code that
+# reads the server's clock instead of Washington's fails here, not on the
+# live site.
+env:
+  TZ: UTC
+
 jobs:
   lint:
     runs-on: ubuntu-latest

@@ -25,7 +25,7 @@ from psycopg.rows import dict_row
 
 from ingest.bills import bill_for
 from ingest.categories import categorize, is_known
-from ingest.congress import session_year, sessions_to_check
+from ingest.congress import session_year, sessions_to_check, today_in_washington
 from ingest.db import connect
 from ingest.fetch import open_url
 from ingest.runs import record_run
@@ -423,7 +423,7 @@ def main() -> None:
     with connect() as conn:
         if args.congress is None:
             checked = "the current session and the one before it"
-            loaded = load_current(conn, args.chamber, date.today(), args.limit)
+            loaded = load_current(conn, args.chamber, today_in_washington(), args.limit)
         else:
             checked = f"Congress {args.congress}, session {args.session}"
             loaded = load(conn, args.chamber, args.congress, args.session, args.limit)

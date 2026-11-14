@@ -9,6 +9,7 @@ import argparse
 import json
 from datetime import date
 
+from ingest.congress import today_in_washington
 from ingest.db import connect
 from ingest.fetch import open_url
 from ingest.runs import record_run
@@ -123,7 +124,9 @@ def to_row(member: dict, on_date: date | None = None) -> dict:
         "office_address": term.get("address"),
         "website": term.get("url"),
         "contact_form": term.get("contact_form"),
-        "leadership_titles": current_leadership_titles(member, on_date or date.today()),
+        "leadership_titles": current_leadership_titles(
+            member, on_date or today_in_washington()
+        ),
         "source": SOURCE,
     }
 

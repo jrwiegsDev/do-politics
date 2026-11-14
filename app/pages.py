@@ -25,6 +25,7 @@ from app.pay import (
 )
 from app.search import MAX_LENGTH, read_search
 from app.votes import find_attendance, find_policy_areas, find_recent_votes
+from ingest.congress import today_in_washington
 
 # How many votes the member tile shows at a time.
 PAGE_SIZE = 20
@@ -178,7 +179,7 @@ def member_tile(request: Request, conn: Conn, bioguide_id: BioguideId) -> HTMLRe
 
     # The member's current leadership roles set the pay for every year shown.
     yearly = salary(official["leadership_titles"])
-    today = date.today()
+    today = today_in_washington()
     attendance = [
         pay_for_session(row, yearly, official["term_start"], today)
         for row in find_attendance(conn, bioguide_id)

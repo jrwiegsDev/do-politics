@@ -5,6 +5,8 @@ from datetime import date
 import psycopg
 from psycopg.rows import dict_row
 
+from ingest.congress import today_in_washington
+
 FIND_OFFICIALS_SQL = """
 SELECT bioguide_id, name, party, chamber, state, district_code,
        phone, office_address, website, contact_form,
@@ -42,7 +44,7 @@ def find_officials(
     params = {
         "state_fips": state_fips,
         "district_code": district_code,
-        "on_date": on_date or date.today(),
+        "on_date": on_date or today_in_washington(),
     }
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(FIND_OFFICIALS_SQL, params).fetchall()
