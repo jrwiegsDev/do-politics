@@ -76,3 +76,30 @@ def test_clear_empties_the_fields_and_every_tile(page: Page):
         expect(page.get_by_label(label)).to_have_value("")
     for tile in ("#officials-tile", "#member-tile", "#bill-tile"):
         expect(page.locator(tile)).to_be_empty()
+
+
+def test_scrolling_past_the_top_of_a_tile_moves_the_page(page: Page):
+    look_up_the_capitol(page)
+    page.get_by_role("button", name="Casey Rep").click()
+    page.get_by_role("button", name="Example Act").click()
+    bill = page.locator("#bill-tile")
+    expect(bill.get_by_role("heading", name="Example Act")).to_be_visible()
+
+    # The made-up bill is short, so give the tile enough to scroll, then
+    # start with the tile at its top and the page scrolled down to it, as it
+    # is after a bill opens.
+    bill.evaluate(
+        """tile => {
+            tile.insertAdjacentHTML("beforeend", '<div style="height: 200vh"></div>');
+            tile.scrollTop = 0;
+            tile.scrollIntoView();
+        }"""
+    )
+    page_top = page.evaluate("window.scrollY")
+    assert page_top > 0
+
+    bill.hover()
+    page.mouse.wheel(0, -200)
+
+    page.wait_for_function("top => window.scrollY < top", arg=page_top)
+    assert bill.evaluate("tile => tile.scrollTop") == 0

@@ -145,9 +145,11 @@ body {
 #officials-tile,
 #member-tile,
 #bill-tile {
+  /* Once a tile is scrolled to its top or bottom, scrolling further moves
+     the page instead (the browser's default, called scroll chaining), so a
+     reader never has to move the pointer off a tile to reach the rest of the
+     page. */
   overflow-y: auto;
-  /* Scrolling to the end of a tile does not start scrolling the page. */
-  overscroll-behavior: contain;
 }
 
 .tile {
