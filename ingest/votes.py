@@ -27,6 +27,7 @@ from ingest.bills import bill_for
 from ingest.categories import categorize, is_known
 from ingest.congress import session_year, sessions_to_check
 from ingest.db import connect
+from ingest.fetch import open_url
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
 
@@ -134,7 +135,7 @@ def fetch_xml(url: str) -> ET.Element:
     anywhere but the address asked for is what marks a miss.
     """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with open_url(request, timeout=30) as response:
         if response.url != url:
             raise NotPublished(url)
         return ET.fromstring(response.read())

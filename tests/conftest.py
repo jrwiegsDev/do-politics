@@ -93,3 +93,13 @@ def committing_conn(conn):
     conn.execute("DELETE FROM members")
     conn.execute("DELETE FROM ingestion_runs WHERE id > %s", [last_run_id])
     conn.commit()
+
+
+@pytest.fixture(autouse=True)
+def no_retry_waits(monkeypatch):
+    """Make the loaders' retry waits zero, so a test that fails a download never sleeps.
+
+    The retries themselves still happen. tests/test_fetch.py replaces this
+    with its own stand-in when a test needs to see the waits.
+    """
+    monkeypatch.setattr("ingest.fetch.backoff_delay", lambda attempt: 0)

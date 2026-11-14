@@ -7,9 +7,9 @@ Usage:
 
 import argparse
 import json
-import urllib.request
 
 from ingest.db import connect
+from ingest.fetch import open_url
 from ingest.runs import record_run
 
 JOB = "members"
@@ -42,7 +42,7 @@ def fetch(source: str) -> list[dict]:
     people move from the current file to the historical one between runs.
     """
     url = f"https://unitedstates.github.io/{PROJECT}/{source}.json"
-    with urllib.request.urlopen(url, timeout=60) as response:
+    with open_url(url, timeout=60) as response:
         return json.load(response)
 
 
