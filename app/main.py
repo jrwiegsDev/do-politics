@@ -14,6 +14,7 @@ from app.bills import BillType, find_bill
 # get_conn is imported so that `from app.main import get_conn` keeps working.
 from app.deps import Conn, get_conn, lifespan, lookup_wait  # noqa: F401
 from app.geocoder import GeocoderUnavailable, geocode
+from app.logs import add_request_ids
 from app.lookup import lookup
 from app.members import find_member
 from app.pages import router as pages_router
@@ -23,6 +24,9 @@ from app.votes import ALL_CATEGORIES, FINAL_CATEGORIES, find_recent_votes
 
 app = FastAPI(title="DoPolitics", lifespan=lifespan)
 add_security_headers(app)
+# Added last, so it runs first: every request gets an ID and a log line,
+# whatever happens inside.
+add_request_ids(app)
 
 # The stylesheet and the HTMX script are served from our own folder, so a
 # visitor's browser never has to ask another site for anything.

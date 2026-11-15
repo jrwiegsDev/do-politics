@@ -10,6 +10,7 @@ import psycopg
 from fastapi import Depends, FastAPI, Request
 from psycopg_pool import ConnectionPool
 
+from app.logs import configure_logging
 from app.ratelimit import lookup_limiter
 from ingest.db import conninfo
 
@@ -29,6 +30,7 @@ SWEEP_SECONDS = 10.0
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Open the pool when the app starts and close it when the app stops."""
+    configure_logging()
     pool = ConnectionPool(
         conninfo(),
         min_size=POOL_MIN_SIZE,
