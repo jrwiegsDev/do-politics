@@ -131,11 +131,22 @@ def test_policy_pages_point_nobody_to_github_issues(client, path):
 
 
 @pytest.mark.parametrize("path", ["/privacy", "/terms"])
-def test_policy_pages_leave_out_questions_until_a_contact_email_is_set(client, path):
+def test_policy_pages_leave_out_questions_until_a_contact_email_is_set(
+    client, monkeypatch, path
+):
+    monkeypatch.setattr("app.pages.CONTACT_EMAIL", "")
+
     page = client.get(path).text
 
     assert "<h3>Questions</h3>" not in page
     assert "mailto:" not in page
+
+
+@pytest.mark.parametrize("path", ["/privacy", "/terms"])
+def test_policy_pages_give_the_site_s_contact_email(client, path):
+    page = client.get(path).text
+
+    assert 'href="mailto:contact@dopolitics.org">contact@dopolitics.org</a>' in page
 
 
 @pytest.mark.parametrize("path", ["/privacy", "/terms"])
