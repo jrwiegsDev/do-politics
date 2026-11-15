@@ -16,4 +16,4 @@ DoPolitics is openly progressive. This page says how the site writes about bills
 
 ## Corrections
 
-If something here is wrong, open an issue at https://github.com/jrwiegsDev/do-politics/issues. Corrections are made in the open.
+If something here is wrong, email contact@dopolitics.org. Corrections are made in the open: every change to the site is public at https://github.com/jrwiegsDev/do-politics.

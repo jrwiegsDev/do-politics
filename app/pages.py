@@ -30,10 +30,10 @@ from ingest.congress import today_in_washington
 # How many votes the member tile shows at a time.
 PAGE_SIZE = 20
 
-# Where visitors send questions about the privacy policy and terms of use.
-# While it is empty, the pages leave out their Questions section; it must be
-# set before launch.
-CONTACT_EMAIL = ""
+# Where visitors send questions about the privacy policy and terms of use. It
+# forwards to the maintainer's inbox. If it is ever emptied, the pages leave
+# out their Questions section rather than show a blank address.
+CONTACT_EMAIL = "contact@dopolitics.org"
 
 # Congress works on Eastern time, so that is the day a vote is said to be on.
 EASTERN = ZoneInfo("America/New_York")
