@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from app.address import Address
 from app.bills import BillType, bill_label, find_bill, find_member_votes
-from app.deps import Conn
+from app.deps import Conn, lookup_wait
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.officials import find_official
@@ -156,6 +156,19 @@ def officials_tile(
             422,
             clear_tiles=True,
         )
+
+    # Counted after the address is checked, since only a lookup that reaches
+    # the Census needs limiting.
+    wait = lookup_wait(request)
+    if wait is not None:
+        response = message(
+            request,
+            "That's a lot of lookups in a short time. Try again in a minute.",
+            429,
+            clear_tiles=True,
+        )
+        response.headers["Retry-After"] = str(wait)
+        return response
 
     try:
         point = geocode(address)

@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Path, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -12,7 +12,7 @@ from app.address import Address
 from app.bills import BillType, find_bill
 
 # get_conn is imported so that `from app.main import get_conn` keeps working.
-from app.deps import Conn, get_conn, lifespan  # noqa: F401
+from app.deps import Conn, get_conn, lifespan, lookup_wait  # noqa: F401
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.members import find_member
@@ -70,11 +70,21 @@ def health(conn: Conn) -> dict:
 
 
 @app.post("/lookup")
-def lookup_address(address: Address, conn: Conn) -> dict:
+def lookup_address(address: Address, conn: Conn, request: Request) -> dict:
     """Return the district and the members of Congress for a street address.
 
-    The address is the request body. It is used once and never stored.
+    The address is the request body. It is used once and never stored. Each
+    visitor gets a few lookups a minute; past that, the answer is 429 with
+    Retry-After, and the Census is not asked.
     """
+    wait = lookup_wait(request)
+    if wait is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many lookups. Try again in {wait} seconds.",
+            headers={"Retry-After": str(wait)},
+        )
+
     try:
         point = geocode(address)
     except GeocoderUnavailable:
