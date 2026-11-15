@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>DoPolitics</title>
+  <!-- Tile in the page's paper color, so the icon reads on light and dark tab bars. -->
+  <rect width="32" height="32" rx="6" fill="#f6f4ef"/>
+  <!-- Flag on the dome. -->
+  <path d="M16 2.5v4.5" stroke="#1d4ed8" stroke-width="1"/>
+  <path d="M16.5 2.5h4l-1 1.25 1 1.25h-4z" fill="#dc2626"/>
+  <!-- Lantern, dome and the band beneath it. -->
+  <rect x="14.5" y="6.5" width="3" height="2" fill="#1d4ed8"/>
+  <path d="M9.5 15a6.5 6.5 0 0 1 13 0z" fill="#1d4ed8"/>
+  <rect x="6" y="15" width="20" height="2" fill="#1d4ed8"/>
+  <!-- Columns. -->
+  <g fill="#1d4ed8">
+    <rect x="7" y="17.5" width="2" height="6"/>
+    <rect x="11" y="17.5" width="2" height="6"/>
+    <rect x="15" y="17.5" width="2" height="6"/>
+    <rect x="19" y="17.5" width="2" height="6"/>
+    <rect x="23" y="17.5" width="2" height="6"/>
+  </g>
+  <!-- Base and steps. -->
+  <rect x="5" y="23.5" width="22" height="2" fill="#1d4ed8"/>
+  <rect x="3" y="26" width="26" height="2.5" fill="#dc2626"/>
+</svg>

@@ -6,7 +6,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, Path, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
@@ -42,6 +42,10 @@ BioguideId = Annotated[str, Path(pattern=r"^[A-Z]\d{6}$")]
 
 router = APIRouter(default_response_class=HTMLResponse, include_in_schema=False)
 templates = Jinja2Templates(directory=FilePath(__file__).parent / "templates")
+
+# The site's icon: a capitol in the page's colors, drawn as an SVG so one
+# small file stays sharp at every size.
+FAVICON = FilePath(__file__).parent / "static" / "favicon.svg"
 
 
 def long_date(day: date) -> str:
@@ -114,6 +118,17 @@ def message(
 def index(request: Request) -> HTMLResponse:
     """Return the whole page: the greeting and the address tile."""
     return templates.TemplateResponse(request, "index.html")
+
+
+@router.get("/favicon.ico")
+def favicon() -> FileResponse:
+    """Return the site's icon at the path browsers and crawlers ask for by habit.
+
+    Pages point to /static/favicon.svg, but many clients request /favicon.ico
+    without reading the page first. Sending the same SVG here, with its real
+    type, answers them instead of logging a 404 on every visit.
+    """
+    return FileResponse(FAVICON, media_type="image/svg+xml")
 
 
 @router.get("/privacy")
