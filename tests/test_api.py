@@ -18,6 +18,7 @@ from helpers import (
 
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
+from app.ratelimit import LOOKUP_LIMIT
 
 CAPITOL = (-89.6548, 39.7984)
 MID_ATLANTIC = (-40.0, 35.0)
@@ -71,6 +72,28 @@ def test_lookup_returns_the_district_senators_and_representative(
     }
     assert [s["name"] for s in body["senators"]] == ["Alex Senator", "Blake Senator"]
     assert body["representative"]["name"] == "Casey Rep"
+
+
+def test_lookups_past_the_limit_get_429_and_never_reach_the_census(
+    client, conn, monkeypatch
+):
+    add(conn, seated(SENATOR_A), seated(SENATOR_B), seated(REP_13))
+    asked = []
+    monkeypatch.setattr("app.main.geocode", lambda address: asked.append(1) or CAPITOL)
+
+    for _ in range(LOOKUP_LIMIT):
+        assert client.post("/lookup", json=ADDRESS).status_code == 200
+    refused = client.post("/lookup", json=ADDRESS)
+
+    assert refused.status_code == 429
+    assert 1 <= int(refused.headers["Retry-After"]) <= 60
+    assert "Too many lookups" in refused.json()["detail"]
+    assert len(asked) == LOOKUP_LIMIT
+
+
+def test_an_invalid_address_is_not_counted_as_a_lookup(client):
+    for _ in range(LOOKUP_LIMIT + 2):
+        assert client.post("/lookup", json={"street": ""}).status_code == 422
 
 
 def test_lookup_reports_a_vacant_seat_as_no_representative(client, conn, monkeypatch):

@@ -21,6 +21,7 @@ from helpers import (
 from app.bills import bill_label
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
+from app.ratelimit import LOOKUP_LIMIT
 
 CAPITOL = (-89.6548, 39.7984)
 MID_ATLANTIC = (-40.0, 35.0)
@@ -276,6 +277,24 @@ def test_street_and_zip_code_alone_are_accepted(client, conn, monkeypatch):
 
     assert response.status_code == 200
     assert "Alex Senator" in response.text
+
+
+def test_officials_tile_past_the_limit_says_to_wait_and_skips_the_census(
+    client, conn, monkeypatch
+):
+    add(conn, seated(SENATOR_A), seated(SENATOR_B), seated(REP_13))
+    asked = []
+    monkeypatch.setattr("app.pages.geocode", lambda address: asked.append(1) or CAPITOL)
+
+    for _ in range(LOOKUP_LIMIT):
+        assert client.post("/tiles/officials", data=ADDRESS).status_code == 200
+    refused = client.post("/tiles/officials", data=ADDRESS)
+
+    assert refused.status_code == 429
+    assert "Try again in a minute." in refused.text
+    assert CLEARS_MEMBER in refused.text
+    assert 1 <= int(refused.headers["Retry-After"]) <= 60
+    assert len(asked) == LOOKUP_LIMIT
 
 
 def test_address_cannot_be_sent_in_the_url(client):

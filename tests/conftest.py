@@ -7,6 +7,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
+from app.ratelimit import lookup_limiter
 from ingest.congressional_districts import effective_from_for, load_state
 from ingest.db import connect
 
@@ -103,3 +104,11 @@ def no_retry_waits(monkeypatch):
     with its own stand-in when a test needs to see the waits.
     """
     monkeypatch.setattr("ingest.fetch.backoff_delay", lambda attempt: 0)
+
+
+@pytest.fixture(autouse=True)
+def fresh_lookup_counts():
+    """Start every test with no lookups counted, so the suite never limits itself."""
+    lookup_limiter.clear()
+    yield
+    lookup_limiter.clear()
