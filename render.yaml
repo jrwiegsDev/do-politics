@@ -1,0 +1,171 @@
+# DoPolitics on Render: the web app, its Postgres database, and the scheduled
+# jobs that keep the data current. Created from the Render Dashboard
+# (New > Blueprint); every later change goes through a pull request.
+#
+# Region: Ohio, for the whole stack, since the app and the database talk
+# over Render's private network and a region can't change after creation.
+# Cron schedules are UTC, at hours that are overnight in every US time zone
+# (08:00-11:00 UTC is 3-6 a.m. Eastern and 10 p.m.-1 a.m. Hawaii).
+#
+# Secrets follow least privilege: each service gets only what it uses. The
+# web app gets only the database. The two API keys live in their own
+# environment groups, attached only to the jobs that call those APIs.
+# sync: false means Render asks for the value in the Dashboard at creation;
+# no secret is ever written in this file.
+
+projects:
+  - name: dopolitics
+    environments:
+      - name: production
+
+        databases:
+          - name: dopolitics-db
+            plan: 0.5c-1g # $19/month: 1 GB RAM, so the 221 MB of data fits in memory
+            region: ohio
+            postgresMajorVersion: "18"
+            databaseName: dopolitics
+            user: dopolitics
+            # Storage is billed at $0.30/GB a month; the plan's default is 15 GB.
+            # 5 GB is many times the data, and autoscaling grows it if needed.
+            diskSizeGB: 5
+            storageAutoscalingEnabled: true
+            # No connections from the internet at all: only services on
+            # Render's private network can reach it.
+            ipAllowList: []
+
+        envVarGroups:
+          - name: congress-api
+            envVars:
+              - key: CONGRESS_API_KEY
+                sync: false
+          - name: anthropic-api
+            envVars:
+              - key: ANTHROPIC_API_KEY
+                sync: false
+
+        services:
+          - type: web
+            name: dopolitics
+            runtime: python
+            plan: 0.5c-512mb # Starter, $7/month
+            region: ohio
+            # Render installs uv because uv.lock is present, and Python from
+            # .python-version. --frozen installs exactly what uv.lock says
+            # (what CI tested); --no-dev leaves out pytest, Playwright and Ruff.
+            buildCommand: uv sync --frozen --no-dev
+            # Bring the schema up to date before the new version takes traffic.
+            preDeployCommand: uv run --no-sync alembic upgrade head
+            # One worker. --proxy-headers reads the visitor's address from
+            # Render's proxy, which the rate limiter counts by. --no-access-log:
+            # the app logs its own line per request, tagged with Render's ID.
+            startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*" --no-access-log
+            healthCheckPath: /health
+            # Deploy a commit to main only after its GitHub checks pass.
+            autoDeployTrigger: checksPass
+            # Render adds www.dopolitics.org and redirects it here.
+            domains:
+              - dopolitics.org
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+
+          # New roll calls from the House Clerk and the Senate, daily.
+          - type: cron
+            name: load-votes
+            runtime: python
+            plan: 0.5c-512mb
+            region: ohio
+            schedule: "0 9 * * *"
+            buildCommand: uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python -m ingest.votes --chamber house && uv run --no-sync python -m ingest.votes --chamber senate
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+
+          # The bills those votes name, with their latest actions and CRS
+          # summaries, daily, after the votes.
+          - type: cron
+            name: load-bills
+            runtime: python
+            plan: 0.5c-512mb
+            region: ohio
+            schedule: "30 9 * * *"
+            buildCommand: uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python -m ingest.bills
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+              - fromGroup: congress-api
+
+          # Plain-language drafts for bills that have none yet, daily, after
+          # the bills. At most 20 a night and $1.50; they show on the site
+          # marked "Not yet reviewed by human eyes".
+          - type: cron
+            name: draft-new-summaries
+            runtime: python
+            plan: 0.5c-512mb
+            region: ohio
+            schedule: "15 10 * * *"
+            buildCommand: uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python -m ingest.summaries sample --new-only --limit 20 --budget 1.50
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+              - fromGroup: anthropic-api
+
+          # Rewrite approved summaries whose review note asks for a change,
+          # nightly. Replaces the launchd job on the Mac.
+          - type: cron
+            name: revise-summaries
+            runtime: python
+            plan: 0.5c-512mb
+            region: ohio
+            schedule: "45 10 * * *"
+            buildCommand: uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python -m ingest.summaries revise --budget 1
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+              - fromGroup: anthropic-api
+
+          # Everyone who has served in Congress, then who holds each seat now,
+          # weekly on Sunday. Run it by hand too right after January 3.
+          - type: cron
+            name: load-members-and-officials
+            runtime: python
+            plan: 0.5c-512mb
+            region: ohio
+            schedule: "0 8 * * 0"
+            buildCommand: uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python -m ingest.members && uv run --no-sync python -m ingest.officials
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+
+          # Members' photos, monthly on the 1st.
+          - type: cron
+            name: load-photos
+            runtime: python
+            plan: 0.5c-512mb
+            region: ohio
+            schedule: "40 8 1 * *"
+            buildCommand: uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python -m ingest.photos
+            envVars:
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: dopolitics-db
+                  property: connectionString
+              - fromGroup: congress-api

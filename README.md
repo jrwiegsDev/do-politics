@@ -129,6 +129,20 @@ The image is built from `db/Dockerfile`: the official `postgres:18` image plus t
 
 To stop the database, run `docker compose down`. Data is kept in a named volume. To delete the data as well, run `docker compose down -v`.
 
+## Deploying
+
+The site runs on [Render](https://render.com), described in `render.yaml` (a Render Blueprint), so every infrastructure change is reviewed in a pull request like code. One project, `dopolitics`, in the Ohio region:
+
+| Resource | What it does |
+|---|---|
+| `dopolitics` (web, Starter) | The app. Built with `uv sync --frozen --no-dev` (exactly the versions in `uv.lock`, without test tools), Python from `.python-version`. Each deploy runs `alembic upgrade head` first, then starts one uvicorn worker. Deploys automatically when a commit to `main` passes CI. Serves `dopolitics.org`. |
+| `dopolitics-db` (Postgres 18, 1 GB RAM, 5 GB disk) | Reachable only from Render's private network: its IP allow list is empty. |
+| `load-votes`, `load-bills` | Daily new roll calls, then the bills they name. |
+| `draft-new-summaries`, `revise-summaries` | Daily drafts for bills with none yet (at most 20 and $1.50), and rewrites of approved summaries whose note asks for a change. |
+| `load-members-and-officials`, `load-photos` | Weekly and monthly. |
+
+Each service gets only the secrets it uses: the web app has only the database URL, and the Congress.gov and Claude API keys sit in two environment groups attached only to the jobs that call those APIs. Their values are entered in the Render Dashboard and never appear in the file. Cron schedules are in UTC, at hours that are overnight in every US time zone.
+
 ## Schema migrations
 
 The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). Each change is a numbered file in `migrations/versions/`, written as plain SQL. Alembic records the latest revision applied in an `alembic_version` table and runs only the files after it, so the same command builds an empty database or brings an existing one up to date:
