@@ -60,6 +60,21 @@ ORDER BY g.status = 'approved' DESC, g.generated_at DESC, g.id DESC
 LIMIT 1;
 """
 
+# The major steps a bill has taken, oldest first. The Library of Congress
+# writes these in plain form ('Introduced in House', 'Passed/agreed to in
+# House: ... by voice vote', 'Became Public Law No: 119-21.'), alongside the
+# chambers' own fuller records of the same steps, which are left out. It
+# sometimes records one step twice under two codes, so steps with the same
+# day and words are shown once, where the first of them falls.
+MAJOR_ACTIONS_SQL = """
+SELECT acted_on, action_text
+FROM bill_actions
+WHERE bill_id = %(bill_id)s
+  AND source = 'Library of Congress'
+GROUP BY acted_on, action_text
+ORDER BY min(position);
+"""
+
 # Every roll call on the bill, newest first, so the top one shows where it
 # stands. Votes on amendments are left out: they decide a change someone
 # offered, not the bill. 'Aye' and 'No' are how the House records some
@@ -114,6 +129,8 @@ def find_bill(
     one has.
     'votes' holds each roll call on the bill, newest first, with how many
     members of each party voted yes and no.
+    'actions' holds the bill's major steps, oldest first, each with its day
+    and words; it is empty until the loader has stored them.
     """
     params = {"congress": congress, "bill_type": bill_type, "bill_number": bill_number}
     with conn.cursor(row_factory=dict_row) as cur:
@@ -127,6 +144,8 @@ def find_bill(
         generated = cur.execute(GENERATED_SUMMARY_SQL, {"bill_id": bill_id})
         bill["generated"] = generated.fetchone()
         bill["votes"] = cur.execute(BILL_VOTES_SQL, params).fetchall()
+        actions = cur.execute(MAJOR_ACTIONS_SQL, {"bill_id": bill_id})
+        bill["actions"] = actions.fetchall()
 
     return bill
 

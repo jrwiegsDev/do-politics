@@ -9,6 +9,7 @@ from helpers import (
     REP_13,
     SENATOR_A,
     SENATOR_B,
+    action,
     add,
     add_bill,
     add_generated,
@@ -790,6 +791,42 @@ def test_bill_tile_says_when_there_is_no_official_summary(client, conn):
 
     assert "No official summary has been published for this bill yet." in tile
     assert "<details" not in tile
+
+
+def test_bill_tile_shows_how_the_bill_moved_oldest_first_folded(client, conn):
+    add_members(conn)
+    add_bill(
+        conn,
+        actions=[
+            action(0, date(2025, 1, 15), "Introduced in House"),
+            action(1, date(2025, 3, 2), "Passed/agreed to in House: By voice vote."),
+        ],
+    )
+
+    tile = client.get(BILL).text
+
+    assert '<details class="fold">' in tile
+    assert "How this bill moved" in tile
+    assert tile.index("Introduced in House") < tile.index("By voice vote.")
+    assert "Mar 2, 2025" in tile
+
+
+def test_bill_tile_leaves_out_how_the_bill_moved_until_actions_are_stored(client, conn):
+    add_members(conn)
+    add_bill(conn)
+
+    assert "How this bill moved" not in client.get(BILL).text
+
+
+def test_an_action_is_shown_as_text_and_never_as_html(client, conn):
+    add_members(conn)
+    text = "<script>alert(1)</script>"
+    add_bill(conn, actions=[action(0, date(2025, 1, 15), text)])
+
+    tile = client.get(BILL).text
+
+    assert text not in tile
+    assert "&lt;script&gt;" in tile
 
 
 def test_a_summary_is_shown_as_text_and_never_as_html(client, conn):

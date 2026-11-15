@@ -47,11 +47,19 @@ class SummaryOut(BaseModel):
     summary_text: str
 
 
-class BillOut(BaseModel):
-    """A bill and its official summaries, as the API sends them.
+class ActionOut(BaseModel):
+    """One major step a bill has taken, as the API sends it."""
 
-    Only the fields named here and in SummaryOut are ever sent, whatever the
-    query returned. That is what keeps a summary's original HTML off the wire.
+    acted_on: date
+    action_text: str
+
+
+class BillOut(BaseModel):
+    """A bill, its official summaries and its major steps, as the API sends them.
+
+    Only the fields named here, in SummaryOut and in ActionOut are ever
+    sent, whatever the query returned. That is what keeps a summary's
+    original HTML off the wire.
     """
 
     congress: int
@@ -66,6 +74,7 @@ class BillOut(BaseModel):
     latest_action: str | None
     source_url: str
     summaries: list[SummaryOut]
+    actions: list[ActionOut]
 
 
 # HEAD as well as GET: Render and uptime monitors check with either. The HEAD
@@ -179,10 +188,12 @@ def bill(
     bill_type: BillType,
     bill_number: Annotated[int, Path(ge=1)],
 ) -> dict:
-    """Return a bill and its official summaries, newest stage first.
+    """Return a bill, its official summaries and its major steps.
 
     Each summary describes the bill at the stage it names, such as
-    'Passed Senate'. A bill with no official summary has an empty list.
+    'Passed Senate', newest stage first. A bill with no official summary has
+    an empty list. The major steps run oldest first, as the Library of
+    Congress records them, and include passage by voice vote.
     """
     found = find_bill(conn, congress, bill_type, bill_number)
     if found is None:
