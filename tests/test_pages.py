@@ -172,6 +172,38 @@ def test_stylesheet_and_script_are_served_from_our_own_folder(client):
     assert client.get("/static/htmx.min.js").status_code == 200
 
 
+def test_every_page_points_to_the_icon_in_our_own_folder(client):
+    for path in ("/", "/privacy", "/terms"):
+        page = client.get(path).text
+
+        assert (
+            '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in page
+        ), path
+
+
+@pytest.mark.parametrize("path", ["/static/favicon.svg", "/favicon.ico"])
+def test_the_icon_is_served_as_an_svg(client, path):
+    # Many browsers and crawlers ask for /favicon.ico without reading the
+    # page, so that path answers with the same icon instead of a 404.
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.content.startswith(b"<svg")
+
+
+def test_the_old_icon_path_stays_out_of_the_api_docs(client):
+    assert "/favicon.ico" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_every_page_links_to_the_source_code(client):
+    for path in ("/", "/privacy", "/terms"):
+        page = client.get(path).text
+
+        assert 'href="https://github.com/jrwiegsDev/do-politics"' in page, path
+        assert ">Source code</a>" in page, path
+
+
 def test_officials_tile_lists_the_senators_and_the_representative(
     client, conn, monkeypatch
 ):
