@@ -23,6 +23,7 @@ from helpers import (
     REP_13,
     SENATOR_A,
     SENATOR_B,
+    action,
     add,
     add_bill,
     add_members,
@@ -120,6 +121,10 @@ def illinois_officials(committing_conn):
         committing_conn,
         summaries=[
             summary("00", date(2025, 1, 15), "Introduced in House", "Does a thing.")
+        ],
+        actions=[
+            action(0, date(2025, 1, 15), "Introduced in House"),
+            action(1, date(2025, 3, 2), "Passed/agreed to in House: By voice vote."),
         ],
     )
     add_vote(committing_conn, 1, day=5, positions={REP_13["bioguide_id"]: "Yea"})

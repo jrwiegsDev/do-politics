@@ -52,6 +52,24 @@
 </details>
 {% endif %}
 
+{# The major steps the bill has taken, oldest first, as the Library of
+   Congress records them. This is where a bill passed by voice vote or
+   unanimous consent shows it, since no roll call above records it. Folded
+   at first like the votes. #}
+{% if bill.actions %}
+<details class="fold">
+  <summary><h3>How this bill moved</h3></summary>
+  <ol class="bill-actions">
+    {% for action in bill.actions %}
+    <li class="bill-action">
+      <div class="vote-detail">{{ action.acted_on | long_date }}</div>
+      <div>{{ action.action_text }}</div>
+    </li>
+    {% endfor %}
+  </ol>
+</details>
+{% endif %}
+
 {# Labelled as generated and naming the official summary below that it was
    written from. A draft nobody has reviewed yet says so before the reader
    starts, and "How this does you" waits until a person approves it. #}

@@ -138,11 +138,13 @@ def add_bill(
     policy_area="Energy",
     title="Example Act",
     bill_type="hr",
+    actions=(),
 ) -> None:
     """Store a made-up bill of the 119th Congress, sponsored by Pat Example.
 
     It is a House bill unless another type is given. The default number is
-    the bill the made-up votes name ('H R 9999').
+    the bill the made-up votes name ('H R 9999'). actions are rows built
+    with action().
     """
     bill = {
         "congress": 119,
@@ -157,7 +159,20 @@ def add_bill(
         "source_url": f"https://example.test/bill/{bill_number}",
         "source_updated_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
-    save_bill(conn, bill, list(summaries))
+    save_bill(conn, bill, list(summaries), list(actions))
+
+
+def action(position, acted_on, text, source="Library of Congress", code=None):
+    """Build a made-up bill_actions row, without its bill_id."""
+    return {
+        "position": position,
+        "acted_on": acted_on,
+        "acted_at": None,
+        "action_code": code,
+        "action_type": "Floor",
+        "source": source,
+        "action_text": text,
+    }
 
 
 # Generated summaries are written in order, a minute apart, from this moment.

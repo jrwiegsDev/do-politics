@@ -552,6 +552,18 @@ input[type="search"] {
   border-top: 1px solid var(--line);
 }
 
+/* A bill's major steps, laid out like the party votes above them. */
+.bill-actions {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.bill-action {
+  padding: 0.625rem 0;
+  border-top: 1px solid var(--line);
+}
+
 .summary {
   border-top: 1px solid var(--line);
 }

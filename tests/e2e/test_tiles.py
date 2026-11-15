@@ -50,6 +50,20 @@ def test_choosing_a_vote_opens_its_bill(page: Page):
     expect(bill).to_contain_text("Does a thing.")
 
 
+def test_how_the_bill_moved_opens_with_a_click(page: Page):
+    look_up_the_capitol(page)
+    page.get_by_role("button", name="Casey Rep").click()
+    page.get_by_role("button", name="Example Act").click()
+
+    bill = page.locator("#bill-tile")
+    voice_vote = bill.get_by_text("Passed/agreed to in House: By voice vote.")
+    expect(voice_vote).to_be_hidden()
+
+    bill.get_by_text("How this bill moved").click()
+
+    expect(voice_vote).to_be_visible()
+
+
 def test_choosing_another_member_closes_the_open_bill(page: Page):
     look_up_the_capitol(page)
     page.get_by_role("button", name="Casey Rep").click()

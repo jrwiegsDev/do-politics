@@ -9,6 +9,7 @@ from helpers import (
     REP_13,
     SENATOR_A,
     SENATOR_B,
+    action,
     add,
     add_bill,
     add_generated,
@@ -344,7 +345,30 @@ def test_bill_returns_the_bill_and_its_summaries_newest_stage_first(client, conn
                 "summary_text": "As introduced.",
             },
         ],
+        "actions": [],
     }
+
+
+def test_bill_sends_its_major_steps_with_only_their_day_and_words(client, conn):
+    add_members(conn)
+    add_bill(
+        conn,
+        actions=[
+            action(0, date(2025, 1, 15), "Introduced in House", code="1000"),
+            action(1, date(2025, 3, 2), "Passed House by voice vote.", source="House"),
+            action(2, date(2025, 3, 2), "Passed/agreed to in House: By voice vote."),
+        ],
+    )
+
+    body = client.get("/bills/119/hr/9999").json()
+
+    assert body["actions"] == [
+        {"acted_on": "2025-01-15", "action_text": "Introduced in House"},
+        {
+            "acted_on": "2025-03-02",
+            "action_text": "Passed/agreed to in House: By voice vote.",
+        },
+    ]
 
 
 def test_bill_with_no_official_summary_has_an_empty_list(client, conn):
@@ -399,10 +423,13 @@ def test_bill_never_sends_the_original_html_even_if_the_query_returns_it(
             summary("49", date(2025, 5, 9), "Public Law", "As enacted.")
             | {"bill_id": 1}
         ],
+        "actions": [action(0, date(2025, 1, 15), "Introduced") | {"bill_id": 1}],
     }
     monkeypatch.setattr("app.main.find_bill", lambda *args: leaky)
 
     response = client.get("/bills/119/hr/9999")
+
+    assert set(response.json()["actions"][0]) == {"acted_on", "action_text"}
 
     assert response.status_code == 200
     assert "summary_html_source" not in response.text

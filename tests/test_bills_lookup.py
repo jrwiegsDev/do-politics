@@ -3,7 +3,7 @@
 from datetime import date
 
 import pytest
-from helpers import add_bill, add_generated, add_members, add_vote, summary
+from helpers import action, add_bill, add_generated, add_members, add_vote, summary
 
 from app.bills import find_bill
 
@@ -40,6 +40,7 @@ def test_bill_comes_back_with_its_sponsors_name(conn):
         "summaries": [],
         "generated": None,
         "votes": [],
+        "actions": [],
     }
 
 
@@ -372,3 +373,78 @@ def test_only_votes_on_the_bill_asked_for_are_returned(conn):
     add_vote(conn, 2, day=6, positions={PAT: "Yea"}, issue="S 9999")
 
     assert stored(conn)["votes"] == []
+
+
+# A bill's major steps. The Library of Congress writes them in plain form;
+# the chambers' own records of the same steps are left out.
+INTRODUCED_STEP = action(0, date(2025, 1, 15), "Introduced in House", code="Intro-H")
+SAME_STEP_AGAIN = action(1, date(2025, 1, 15), "Introduced in House", code="1000")
+REFERRED = action(2, date(2025, 1, 15), "Referred to committee.", source="House")
+VOICE_VOTE = action(3, date(2025, 3, 2), "Passed/agreed to in House: By voice vote.")
+
+
+def test_a_bill_with_no_stored_actions_has_none(conn):
+    add_members(conn)
+    add_bill(conn)
+
+    assert stored(conn)["actions"] == []
+
+
+def test_major_steps_come_oldest_first_with_their_day_and_words(conn):
+    add_members(conn)
+    add_bill(conn, actions=[INTRODUCED_STEP, VOICE_VOTE])
+
+    assert stored(conn)["actions"] == [
+        {"acted_on": date(2025, 1, 15), "action_text": "Introduced in House"},
+        {
+            "acted_on": date(2025, 3, 2),
+            "action_text": "Passed/agreed to in House: By voice vote.",
+        },
+    ]
+
+
+def test_a_chamber_s_own_record_of_a_step_is_left_out(conn):
+    add_members(conn)
+    add_bill(conn, actions=[INTRODUCED_STEP, REFERRED, VOICE_VOTE])
+
+    texts = [a["action_text"] for a in stored(conn)["actions"]]
+
+    assert "Referred to committee." not in texts
+
+
+def test_a_step_recorded_twice_under_two_codes_is_shown_once(conn):
+    add_members(conn)
+    add_bill(conn, actions=[INTRODUCED_STEP, SAME_STEP_AGAIN, VOICE_VOTE])
+
+    texts = [a["action_text"] for a in stored(conn)["actions"]]
+
+    assert texts == ["Introduced in House", "Passed/agreed to in House: By voice vote."]
+
+
+def test_the_same_words_on_another_day_are_a_separate_step(conn):
+    add_members(conn)
+    later = action(1, date(2025, 2, 1), "Introduced in House")
+    add_bill(conn, actions=[INTRODUCED_STEP, later])
+
+    assert len(stored(conn)["actions"]) == 2
+
+
+def test_order_follows_position_not_the_words(conn):
+    # 'Became' sorts before 'Introduced'; the step that came first still leads.
+    add_members(conn)
+    law = action(1, date(2025, 1, 15), "Became Public Law No: 119-1.")
+    add_bill(conn, actions=[INTRODUCED_STEP, law])
+
+    texts = [a["action_text"] for a in stored(conn)["actions"]]
+
+    assert texts == ["Introduced in House", "Became Public Law No: 119-1."]
+
+
+def test_only_the_bill_asked_for_brings_its_actions(conn):
+    add_members(conn)
+    add_bill(conn, actions=[INTRODUCED_STEP])
+    add_bill(conn, bill_number=7777, actions=[VOICE_VOTE])
+
+    texts = [a["action_text"] for a in stored(conn)["actions"]]
+
+    assert texts == ["Introduced in House"]
