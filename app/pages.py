@@ -108,6 +108,8 @@ def message(
     )
 
 
+# HEAD as well as GET: Render probes the front page with HEAD when a deploy starts.
+@router.head("/")
 @router.get("/")
 def index(request: Request) -> HTMLResponse:
     """Return the whole page: the greeting and the address tile."""

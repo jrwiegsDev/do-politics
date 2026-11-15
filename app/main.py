@@ -68,6 +68,9 @@ class BillOut(BaseModel):
     summaries: list[SummaryOut]
 
 
+# HEAD as well as GET: Render and uptime monitors check with either. The HEAD
+# route is left out of the API docs, which list each operation once.
+@app.head("/health", include_in_schema=False)
 @app.get("/health")
 def health(conn: Conn) -> dict:
     """Report that the API is up and can reach the database."""
