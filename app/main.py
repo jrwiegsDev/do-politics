@@ -12,7 +12,7 @@ from app.address import Address
 from app.bills import BillType, find_bill
 
 # get_conn is imported so that `from app.main import get_conn` keeps working.
-from app.deps import Conn, get_conn  # noqa: F401
+from app.deps import Conn, get_conn, lifespan  # noqa: F401
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.members import find_member
@@ -20,7 +20,7 @@ from app.pages import router as pages_router
 from app.photos import etag_for, etag_matches, find_photo
 from app.votes import ALL_CATEGORIES, FINAL_CATEGORIES, find_recent_votes
 
-app = FastAPI(title="DoPolitics")
+app = FastAPI(title="DoPolitics", lifespan=lifespan)
 
 # The stylesheet and the HTMX script are served from our own folder, so a
 # visitor's browser never has to ask another site for anything.

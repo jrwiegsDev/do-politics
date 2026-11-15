@@ -43,10 +43,9 @@ Plain-language summaries, and a short "How this does you" callout, are written b
 
 | Layer | Choice |
 |---|---|
-| API | Python, FastAPI, Uvicorn, httpx2 |
+| API | Python, FastAPI, Uvicorn, httpx2, psycopg with a psycopg_pool connection pool |
 | Web app | Jinja2 templates served by the same FastAPI app, HTMX, a hand-written stylesheet |
 | Database | PostgreSQL + PostGIS |
-| Cache | Redis |
 | Migrations | Alembic, written as plain SQL |
 | Ingestion | Python, psycopg, pyshp, Beautiful Soup |
 | Dependencies | uv |
@@ -340,6 +339,8 @@ uv run --env-file .env python -m ingest.summaries revise
 ## API
 
 The API is a FastAPI app in `app/main.py`.
+
+The web app borrows database connections from a pool (`app/deps.py`, using `psycopg_pool`) instead of opening one per request. The pool opens when the app starts, keeping 2 to 10 connections, and closes when it stops; each request borrows one and gives it back, committed if the request succeeded and rolled back if it failed. Opening a connection costs a network round trip and a password check, which adds up once the database is on another server, and Postgres caps how many connections it accepts, so the pool keeps requests fast and the total bounded. The pool reads the database settings at startup, not at import, so the tests can point it at their own database. The loaders and migrations still open a single connection each with `ingest/db.py`'s `connect()`.
 
 | Method | Path | Purpose |
 |---|---|---|
