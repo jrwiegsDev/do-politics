@@ -55,9 +55,11 @@ projects:
             buildCommand: uv sync --frozen --no-dev
             # Bring the schema up to date before the new version takes traffic.
             preDeployCommand: uv run --no-sync alembic upgrade head
-            # One worker. --proxy-headers reads the visitor's address from
-            # Render's proxy, which the rate limiter counts by. --no-access-log:
-            # the app logs its own line per request, tagged with Render's ID.
+            # One worker. --proxy-headers takes the scheme (https) from Render's
+            # proxy; the rate limiter keys on Cloudflare's CF-Connecting-IP
+            # instead of X-Forwarded-For, whose first entry a visitor can fake.
+            # --no-access-log: the app logs its own line per request, tagged
+            # with Render's ID.
             startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*" --no-access-log
             healthCheckPath: /health
             # Deploy a commit to main only after its GitHub checks pass (the cron jobs do too).

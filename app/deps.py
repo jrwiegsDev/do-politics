@@ -1,6 +1,7 @@
 """What the JSON endpoints and the pages both depend on: a database connection from the pool."""
 
 import asyncio
+import ipaddress
 import math
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
@@ -58,10 +59,19 @@ async def forget_quiet_visitors() -> None:
 def client_ip(request: Request) -> str:
     """Return the visitor's IP address, the key the rate limiter counts by.
 
-    Behind Render's proxy this is the visitor's own address only when
-    uvicorn is started with --proxy-headers; see the Blueprint.
+    On Render every request passes through Cloudflare, which sets
+    CF-Connecting-IP to the address that connected to it, overwriting any
+    value the visitor sent (and refusing a request that tries). X-Forwarded-For
+    can't be used: Render keeps whatever the visitor wrote at its start and
+    appends the real address after it, so its first entry can be faked to
+    dodge the limit. Without a valid CF-Connecting-IP (on a laptop, in the
+    tests), the connection's own address is used.
     """
-    return request.client.host if request.client else "unknown"
+    sent = request.headers.get("cf-connecting-ip", "").strip()
+    try:
+        return str(ipaddress.ip_address(sent))
+    except ValueError:
+        return request.client.host if request.client else "unknown"
 
 
 def lookup_wait(request: Request) -> int | None:
