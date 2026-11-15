@@ -1,6 +1,7 @@
 """Tests for the API. The geocoder is replaced, so no test calls the Census."""
 
 from datetime import date
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from helpers import (
     add_vote,
     summary,
 )
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
@@ -98,6 +100,53 @@ def test_lookups_past_the_limit_get_429_and_never_reach_the_census(
     assert 1 <= int(refused.headers["Retry-After"]) <= 60
     assert "Too many lookups" in refused.json()["detail"]
     assert len(asked) == LOOKUP_LIMIT
+
+
+def test_faking_forwarded_for_does_not_dodge_the_limit(client, conn, monkeypatch):
+    # The live spoof test on Render: a different fake X-Forwarded-For on each
+    # lookup used to count each as a new visitor. The app is wrapped the way
+    # the start command runs it (--proxy-headers --forwarded-allow-ips "*"),
+    # which rewrites the client address from X-Forwarded-For's first entry.
+    add(conn, seated(SENATOR_A), seated(SENATOR_B), seated(REP_13))
+    geocode_to(monkeypatch, CAPITOL)
+    # Both are standard ASGI apps; Starlette and uvicorn just type ASGI
+    # differently, so the type checker is told they fit.
+    proxied = ProxyHeadersMiddleware(cast(Any, app), trusted_hosts="*")
+    behind_render = TestClient(cast(Any, proxied))
+
+    codes = [
+        behind_render.post(
+            "/lookup",
+            json=ADDRESS,
+            headers={
+                "CF-Connecting-IP": "8.8.4.4",
+                "X-Forwarded-For": f"203.0.113.{n}",
+            },
+        ).status_code
+        for n in range(LOOKUP_LIMIT + 1)
+    ]
+
+    assert codes[-1] == 429
+
+
+def test_each_real_visitor_gets_their_own_limit(client, conn, monkeypatch):
+    add(conn, seated(SENATOR_A), seated(SENATOR_B), seated(REP_13))
+    geocode_to(monkeypatch, CAPITOL)
+    for _ in range(LOOKUP_LIMIT):
+        client.post("/lookup", json=ADDRESS, headers={"CF-Connecting-IP": "8.8.4.4"})
+
+    assert (
+        client.post(
+            "/lookup", json=ADDRESS, headers={"CF-Connecting-IP": "8.8.4.4"}
+        ).status_code
+        == 429
+    )
+    assert (
+        client.post(
+            "/lookup", json=ADDRESS, headers={"CF-Connecting-IP": "1.1.1.1"}
+        ).status_code
+        == 200
+    )
 
 
 def test_an_invalid_address_is_not_counted_as_a_lookup(client):

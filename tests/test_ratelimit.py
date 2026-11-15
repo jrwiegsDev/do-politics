@@ -4,8 +4,11 @@ import threading
 import time
 from collections import deque
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
+from app.deps import client_ip
 from app.main import app
 from app.ratelimit import RateLimiter, lookup_limiter
 
@@ -155,3 +158,38 @@ def test_the_app_forgets_quiet_visitors_on_a_timer(database, monkeypatch):
             time.sleep(0.01)
 
     assert len(sweeps) >= 3
+
+
+def request_with(headers=(), client=("10.0.0.1", 50000)):
+    """Build a bare request with these headers, arriving from this connection."""
+    scope = {
+        "type": "http",
+        "headers": [(name.encode(), value.encode()) for name, value in headers],
+        "client": client,
+    }
+    return Request(scope)
+
+
+def test_the_visitor_is_cloudflare_s_connecting_ip():
+    request = request_with([("cf-connecting-ip", "8.8.4.4")])
+
+    assert client_ip(request) == "8.8.4.4"
+
+
+def test_a_faked_forwarded_for_is_ignored():
+    # Render keeps what the visitor wrote at the start of X-Forwarded-For.
+    request = request_with(
+        [
+            ("x-forwarded-for", "203.0.113.7, 8.8.4.4, 162.158.1.1"),
+            ("cf-connecting-ip", "8.8.4.4"),
+        ]
+    )
+
+    assert client_ip(request) == "8.8.4.4"
+
+
+@pytest.mark.parametrize("sent", ["", "not-an-ip", "8.8.4.4, 1.2.3.4"])
+def test_without_a_valid_cloudflare_header_the_connection_is_used(sent):
+    request = request_with([("cf-connecting-ip", sent)] if sent else [])
+
+    assert client_ip(request) == "10.0.0.1"

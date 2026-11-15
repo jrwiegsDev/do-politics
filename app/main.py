@@ -19,13 +19,11 @@ from app.lookup import lookup
 from app.members import find_member
 from app.pages import router as pages_router
 from app.photos import etag_for, etag_matches, find_photo
-from app.proxy_probe import add_proxy_probe
 from app.security import add_security_headers
 from app.votes import ALL_CATEGORIES, FINAL_CATEGORIES, find_recent_votes
 
 app = FastAPI(title="DoPolitics", lifespan=lifespan)
 add_security_headers(app)
-add_proxy_probe(app)  # TEMPORARY: see app/proxy_probe.py
 # Added last, so it runs first: every request gets an ID and a log line,
 # whatever happens inside.
 add_request_ids(app)
