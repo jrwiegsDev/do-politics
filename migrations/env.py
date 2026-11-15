@@ -16,7 +16,9 @@ config = context.config
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Leave loggers that already exist switched on: the tests import the app,
+    # whose request logger would otherwise go silent once migrations run.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Migrations here are written as plain SQL, so there are no SQLAlchemy models
 # for Alembic to compare the database against.
