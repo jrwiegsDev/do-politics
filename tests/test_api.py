@@ -48,6 +48,15 @@ def geocode_to(monkeypatch, point):
     monkeypatch.setattr("app.main.geocode", lambda address: point)
 
 
+@pytest.mark.parametrize("path", ["/", "/health"])
+def test_head_is_answered_like_get_without_a_body(client, path):
+    # Render probes with HEAD when a deploy starts, as do uptime monitors.
+    response = client.head(path)
+
+    assert response.status_code == 200
+    assert response.content == b""
+
+
 def test_health_reports_ok(client):
     response = client.get("/health")
 

@@ -29,12 +29,21 @@ def request_lines(caplog):
 
 def test_render_s_request_id_is_used_and_sent_back(client, caplog):
     with caplog.at_level(logging.INFO):
-        response = client.get("/health", headers={"Rndr-Id": "abc-123"})
+        response = client.get("/privacy", headers={"Rndr-Id": "abc-123"})
 
     assert response.headers["X-Request-ID"] == "abc-123"
     [line] = request_lines(caplog)
     assert line.request_id == "abc-123"
-    assert line.getMessage().startswith("GET /health 200 in ")
+    assert line.getMessage().startswith("GET /privacy 200 in ")
+
+
+def test_a_healthy_health_check_is_not_logged_but_still_gets_an_id(client, caplog):
+    with caplog.at_level(logging.INFO):
+        response = client.get("/health", headers={"Rndr-Id": "abc-123"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"] == "abc-123"
+    assert request_lines(caplog) == []
 
 
 def test_without_render_an_id_is_made_up(client):
@@ -86,7 +95,7 @@ def test_a_failed_request_is_logged_with_its_id_and_still_answers_500(client, ca
 
 def test_the_line_never_holds_the_query_string(client, caplog):
     with caplog.at_level(logging.INFO):
-        client.get("/health?q=veterans+benefits")
+        client.get("/privacy?q=veterans+benefits")
 
     [line] = request_lines(caplog)
     assert "veterans" not in line.getMessage()

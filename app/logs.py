@@ -34,6 +34,10 @@ LOG_FORMAT = "%(levelname)s request=%(request_id)s %(name)s: %(message)s"
 
 logger = logging.getLogger("app.requests")
 
+# Render checks /health every few seconds, which would bury every other line.
+# A health check is logged only when it fails.
+QUIET_PATHS = frozenset({"/health"})
+
 
 # Whether log records already get the request's ID. The app sets this up
 # once, even if the module that does it is imported more than once.
@@ -94,13 +98,15 @@ def add_request_ids(app: FastAPI) -> None:
             raise
         else:
             milliseconds = round((time.perf_counter() - started) * 1000)
-            logger.info(
-                "%s %s %d in %d ms",
-                request.method,
-                request.url.path,
-                response.status_code,
-                milliseconds,
-            )
+            quiet = request.url.path in QUIET_PATHS and response.status_code < 400
+            if not quiet:
+                logger.info(
+                    "%s %s %d in %d ms",
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    milliseconds,
+                )
             response.headers["X-Request-ID"] = request_id.get()
             return response
         finally:
