@@ -108,8 +108,10 @@ projects:
               - fromGroup: congress-api
 
           # Plain-language drafts for bills that have none yet, or whose CRS
-          # summary moved to a newer stage, daily, after the bills. At most 20 a night and $1.50; they show on the site
-          # marked "Not yet reviewed by human eyes".
+          # summary moved to a newer stage, daily, after the bills. At most 20
+          # a night, within $5 of worst-case cost; what doesn't fit waits for
+          # the next night. They show on the site marked "Not yet reviewed by
+          # human eyes".
           - type: cron
             name: draft-new-summaries
             runtime: python
@@ -118,7 +120,7 @@ projects:
             autoDeployTrigger: checksPass
             schedule: "15 10 * * *"
             buildCommand: uv sync --frozen --no-dev
-            startCommand: uv run --no-sync python -m ingest.summaries sample --new-only --limit 20 --budget 1.50
+            startCommand: uv run --no-sync python -m ingest.summaries sample --new-only --limit 20 --budget 5 --fit-budget
             envVars:
               - key: DATABASE_URL
                 fromDatabase:
@@ -127,7 +129,9 @@ projects:
               - fromGroup: anthropic-api
 
           # Rewrite approved summaries whose review note asks for a change, and
-          # redraft rejected ones, nightly. Replaces the launchd job on the Mac.
+          # redraft rejected ones, nightly, within $5 of worst-case cost; what
+          # doesn't fit waits for the next night. Replaces the launchd job on
+          # the Mac.
           - type: cron
             name: revise-summaries
             runtime: python
@@ -136,7 +140,7 @@ projects:
             autoDeployTrigger: checksPass
             schedule: "45 10 * * *"
             buildCommand: uv sync --frozen --no-dev
-            startCommand: uv run --no-sync python -m ingest.summaries revise --budget 1
+            startCommand: uv run --no-sync python -m ingest.summaries revise --budget 5 --fit-budget
             envVars:
               - key: DATABASE_URL
                 fromDatabase:
