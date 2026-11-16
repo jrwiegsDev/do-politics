@@ -47,6 +47,10 @@ templates = Jinja2Templates(directory=FilePath(__file__).parent / "templates")
 # small file stays sharp at every size.
 FAVICON = FilePath(__file__).parent / "static" / "favicon.svg"
 
+# The same icon as a solid 180x180 PNG, which iPhones and iPads use for the
+# Home Screen and for tabs. Drawn from the SVG by scripts/favicon_pngs.py.
+TOUCH_ICON = FilePath(__file__).parent / "static" / "apple-touch-icon.png"
+
 
 def long_date(day: date) -> str:
     """Return a day written out, such as 'Sep 16, 2026'."""
@@ -129,6 +133,17 @@ def favicon() -> FileResponse:
     type, answers them instead of logging a 404 on every visit.
     """
     return FileResponse(FAVICON, media_type="image/svg+xml")
+
+
+@router.get("/apple-touch-icon.png")
+@router.get("/apple-touch-icon-precomposed.png")
+def touch_icon() -> FileResponse:
+    """Return the Home Screen icon at the paths iPhones and iPads ask for by habit.
+
+    Pages point to /static/apple-touch-icon.png, but iOS also requests these
+    two fixed paths, the second an older name for the same icon.
+    """
+    return FileResponse(TOUCH_ICON, media_type="image/png")
 
 
 @router.get("/privacy")

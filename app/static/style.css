@@ -24,14 +24,27 @@ body {
   line-height: 1.5;
 }
 
-/* Before a lookup the page sits low, with the address tile near the middle.
-   Once the officials tile holds anything, the padding shrinks and everything
-   moves up. */
+/* Mobile first: the rules outside a media query are for a phone, and the
+   @media (min-width: 50rem) blocks add the wide-screen layout on top. 50rem
+   (800px at the default text size) is the one breakpoint: below it the
+   tiles stack in one column and the page scrolls; above it they share rows
+   and each tile scrolls inside itself. */
+
+/* On a phone the page starts near the top. On a wide screen, before a
+   lookup, it sits lower, with the address tile near the middle; once the
+   officials tile holds anything, the padding shrinks and everything moves
+   up. */
 .page {
   max-width: 72rem;
   margin: 0 auto;
-  padding: 18vh 1rem 2rem;
+  padding: 1.5rem 1rem 2rem;
   transition: padding-top 0.4s ease;
+}
+
+@media (min-width: 50rem) {
+  .page {
+    padding-top: 18vh;
+  }
 }
 
 /* After a lookup, and on the policy pages, the page starts near the top. */
@@ -140,13 +153,16 @@ body {
   }
 }
 
-/* After a lookup the page is laid out to fit one screen: the greeting steps
-   aside, the address form folds into one row, and once a member is chosen
-   the officials and member tiles share a fixed height and scroll inside
-   themselves. When the bill tile opens, the two above it shrink a little and
-   the bill tile gets most of a screen of its own, since it holds the most
-   reading; the page scrolls down to it. On a short screen the clamp()
-   minimums win. */
+/* After a lookup the greeting steps aside. On a wide screen the page is
+   laid out to fit one screen: the address form folds into one row, and once
+   a member is chosen the officials and member tiles share a fixed height
+   and scroll inside themselves. When the bill tile opens, the two above it
+   shrink a little and the bill tile gets most of a screen of its own, since
+   it holds the most reading; the page scrolls down to it. On a short screen
+   the clamp() minimums win. On a phone none of that applies: each tile is
+   as tall as what it holds, and the page scrolls. Fixed heights there left
+   empty space under the officials and let the member's pinned details,
+   taller than the tile on a narrow screen, cover the votes. */
 .page:has(#officials-tile:not(:empty)) .intro {
   display: none;
 }
@@ -169,28 +185,30 @@ body {
   }
 }
 
-.tiles:has(#member-tile:not(:empty)) #officials-tile,
-.tiles:has(#member-tile:not(:empty)) #member-tile {
-  height: clamp(18rem, 62vh, 44rem);
-}
+@media (min-width: 50rem) {
+  .tiles:has(#member-tile:not(:empty)) #officials-tile,
+  .tiles:has(#member-tile:not(:empty)) #member-tile {
+    height: clamp(18rem, 62vh, 44rem);
+  }
 
-.tiles:has(#bill-tile:not(:empty)) #officials-tile,
-.tiles:has(#bill-tile:not(:empty)) #member-tile {
-  height: clamp(22rem, 55vh, 40rem);
-}
+  .tiles:has(#bill-tile:not(:empty)) #officials-tile,
+  .tiles:has(#bill-tile:not(:empty)) #member-tile {
+    height: clamp(22rem, 55vh, 40rem);
+  }
 
-#bill-tile {
-  height: clamp(20rem, 70vh, 52rem);
-}
+  #bill-tile {
+    height: clamp(20rem, 70vh, 52rem);
+  }
 
-#officials-tile,
-#member-tile,
-#bill-tile {
-  /* Once a tile is scrolled to its top or bottom, scrolling further moves
-     the page instead (the browser's default, called scroll chaining), so a
-     reader never has to move the pointer off a tile to reach the rest of the
-     page. */
-  overflow-y: auto;
+  #officials-tile,
+  #member-tile,
+  #bill-tile {
+    /* Once a tile is scrolled to its top or bottom, scrolling further moves
+       the page instead (the browser's default, called scroll chaining), so a
+       reader never has to move the pointer off a tile to reach the rest of
+       the page. */
+    overflow-y: auto;
+  }
 }
 
 .tile {
@@ -382,25 +400,57 @@ button.vote-title {
   list-style: none;
 }
 
+/* On a phone the page scrolls rather than the tiles, so a long list would
+   make the page longer with every "Show more votes". Instead the votes, and
+   the officials (only three today, more once state legislators are added),
+   scroll inside a box at most 70% of the screen tall. svh is the screen's
+   height with the browser's toolbars showing, so the box never runs under
+   them; vh is the fallback for older browsers. Once the box is scrolled to
+   its end, scrolling carries on to the page. On a wide screen the whole
+   tile scrolls instead, so the lists are left as they are. */
+.votes,
+.officials {
+  max-height: 70vh;
+  max-height: 70svh;
+  overflow-y: auto;
+}
+
+@media (min-width: 50rem) {
+  .votes,
+  .officials {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 .contact li,
 .attendance li {
   padding: 0.125rem 0;
 }
 
-/* The member's name, contact line and attendance stay pinned to the top of
-   the tile while the votes scroll under them. The tile is the scrolling
-   box, so the block's negative margins take it out to the tile's edges and
-   its own padding puts the text back where it was. A sticky offset counts
-   from inside the tile's padding, so top matches that padding to pin the
-   block flush to the tile's top edge, with no strip for votes to show in. */
+/* The member's name, contact line and attendance, set off from the votes
+   below by a line. */
 .member-pinned {
-  position: sticky;
-  top: -1.25rem;
-  z-index: 1;
-  margin: -1.25rem -1.25rem 0;
-  padding: 1.25rem 1.25rem 0.75rem;
+  padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--line);
-  background: var(--tile);
+}
+
+/* On a wide screen they stay pinned to the top of the tile while the votes
+   scroll under them. The tile is the scrolling box, so the block's negative
+   margins take it out to the tile's edges and its own padding puts the text
+   back where it was. A sticky offset counts from inside the tile's padding,
+   so top matches that padding to pin the block flush to the tile's top
+   edge, with no strip for votes to show in. Not on a phone, where the tile
+   does not scroll and the block would be taller than the screen allows. */
+@media (min-width: 50rem) {
+  .member-pinned {
+    position: sticky;
+    top: -1.25rem;
+    z-index: 1;
+    margin: -1.25rem -1.25rem 0;
+    padding: 1.25rem 1.25rem 0.75rem;
+    background: var(--tile);
+  }
 }
 
 .member-pinned .member-header {
@@ -442,6 +492,7 @@ button.vote-title {
 .vote-filter {
   display: flex;
   flex: 1 1 14rem;
+  min-width: 0;
   align-items: center;
   gap: 0.5rem;
 }
@@ -450,7 +501,12 @@ button.vote-title {
   font-weight: 600;
 }
 
-.vote-filter input {
+/* min-width: 0 lets the box and the dropdown shrink to the row, and (on
+   .vote-filter above) the row shrink to the tile. Without it a flex item is
+   at least as wide as its content, and the dropdown is as wide as its
+   longest topic, which pushed past the tile's edge on a phone. */
+.vote-filter input,
+.vote-filter select {
   flex: 1;
   min-width: 0;
 }

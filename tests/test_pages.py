@@ -197,6 +197,62 @@ def test_the_old_icon_path_stays_out_of_the_api_docs(client):
     assert "/favicon.ico" not in client.get("/openapi.json").json()["paths"]
 
 
+def test_every_page_points_to_png_icons_for_safari_and_iphones(client):
+    # Safari does not reliably use an SVG favicon, and iPhones use their own
+    # touch icon for the Home Screen and tabs.
+    for path in ("/", "/privacy", "/terms"):
+        page = client.get(path).text
+
+        assert (
+            '<link rel="icon" href="/static/favicon-32.png" type="image/png"'
+            ' sizes="32x32">' in page
+        ), path
+        assert (
+            '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">' in page
+        )
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/static/favicon-32.png",
+        "/static/apple-touch-icon.png",
+        "/apple-touch-icon.png",
+        "/apple-touch-icon-precomposed.png",
+    ],
+)
+def test_the_png_icons_are_served_as_pngs(client, path):
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(PNG_SIGNATURE)
+
+
+def png_size(data: bytes) -> tuple[int, int]:
+    """Read a PNG's width and height from its header (the IHDR chunk)."""
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def test_the_touch_icon_is_a_solid_180_pixel_square(client):
+    # iOS fills transparent pixels with black, so the touch icon has no alpha
+    # channel. PNG color type 2 is RGB; 6 would be RGB with alpha.
+    data = client.get("/apple-touch-icon.png").content
+
+    assert png_size(data) == (180, 180)
+    assert data[25] == 2
+
+
+def test_the_touch_icon_paths_stay_out_of_the_api_docs(client):
+    paths = client.get("/openapi.json").json()["paths"]
+
+    assert "/apple-touch-icon.png" not in paths
+    assert "/apple-touch-icon-precomposed.png" not in paths
+
+
 def test_every_page_links_to_the_source_code(client):
     for path in ("/", "/privacy", "/terms"):
         page = client.get(path).text
