@@ -12,6 +12,7 @@ from datetime import date
 from ingest.congress import today_in_washington
 from ingest.db import connect
 from ingest.fetch import open_url
+from ingest.logs import configure_logging
 from ingest.runs import record_run
 from ingest.states import FIPS_BY_POSTAL, NON_VOTING
 
@@ -165,6 +166,7 @@ def load(conn) -> tuple[int, int]:
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--dry-run",

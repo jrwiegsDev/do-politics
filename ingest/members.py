@@ -10,6 +10,7 @@ import json
 
 from ingest.db import connect
 from ingest.fetch import open_url
+from ingest.logs import configure_logging
 from ingest.runs import record_run
 
 JOB = "members"
@@ -88,6 +89,7 @@ def load(conn) -> int:
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--dry-run",

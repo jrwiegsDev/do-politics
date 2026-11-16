@@ -23,6 +23,7 @@ from time import sleep
 from ingest.bills import fetch_json
 from ingest.db import connect
 from ingest.fetch import open_url
+from ingest.logs import configure_logging
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
@@ -180,6 +181,7 @@ def load(conn, limit: int | None = None) -> tuple[int, int, list[str]]:
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--limit", type=int, help="stop after this many members")
     args = parser.parse_args()
