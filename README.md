@@ -148,6 +148,8 @@ The site runs on [Render](https://render.com), described in `render.yaml` (a Ren
 
 Each service gets only the secrets it uses: the web app has only the database URL, and the Congress.gov and Claude API keys sit in two environment groups attached only to the jobs that call those APIs. Their values are entered in the Render Dashboard and never appear in the file. Cron schedules are in UTC, at hours that are overnight in every US time zone.
 
+The routines for running it, [docs/operations.md](docs/operations.md): reviewing summaries over `render ssh` (the database accepts no connections from the internet, so review runs inside Render), the monthly backup and the check that it restores, and recovering the database.
+
 ## Schema migrations
 
 The schema is managed with [Alembic](https://alembic.sqlalchemy.org/). Each change is a numbered file in `migrations/versions/`, written as plain SQL. Alembic records the latest revision applied in an `alembic_version` table and runs only the files after it, so the same command builds an empty database or brings an existing one up to date:
