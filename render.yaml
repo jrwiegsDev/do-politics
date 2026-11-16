@@ -126,8 +126,8 @@ projects:
                   property: connectionString
               - fromGroup: anthropic-api
 
-          # Rewrite approved summaries whose review note asks for a change,
-          # nightly. Replaces the launchd job on the Mac.
+          # Rewrite approved summaries whose review note asks for a change, and
+          # redraft rejected ones, nightly. Replaces the launchd job on the Mac.
           - type: cron
             name: revise-summaries
             runtime: python

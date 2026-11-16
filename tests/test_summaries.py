@@ -13,6 +13,11 @@ from helpers import add_bill, add_members, last_run, summary
 
 from ingest.prompt import (
     PROMPT_VERSION,
+    REDRAFT_PROMPT_VERSION,
+    REDRAFT_SYSTEM_PROMPT,
+    REJECTION_TASK,
+    RETRY_PROMPT_VERSION,
+    RETRY_SYSTEM_PROMPT,
     REVISION_PROMPT_VERSION,
     REVISION_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
@@ -28,6 +33,7 @@ from ingest.summaries import (
     collect,
     local_time,
     marked_changes,
+    redrafts_due,
     request_params,
     review,
     revise,
@@ -738,6 +744,300 @@ def test_review_shows_revisions_first_with_the_note_and_the_changes(
     ).fetchall()
     # The original stays approved; the approved revision replaces it on the site.
     assert statuses == [(True, "approved"), (False, "approved")]
+
+
+# Rewrites after a rejection: a redraft, or another try at a revision.
+
+
+def set_decision(conn, row_id, status, note=None, days_ago=0):
+    """Record a decision on one stored answer, made this many days ago."""
+    conn.execute(
+        "UPDATE generated_summaries SET status = %s, review_note = %s,"
+        " reviewed_at = now() - make_interval(days => %s) WHERE id = %s",
+        [status, note, days_ago, row_id],
+    )
+
+
+def newest_id(conn):
+    return conn.execute("SELECT max(id) FROM generated_summaries").fetchone()[0]
+
+
+def rejected_draft(conn, note="Too vague."):
+    """Store an answer from the older CRS summary, reject it, and return its id."""
+    bill_id = add_bill_with(conn, INTRODUCED, PASSED)
+    store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
+    rejected = newest_id(conn)
+    set_decision(conn, rejected, "rejected", note)
+    conn.commit()
+    return rejected
+
+
+def rejected_revision(conn, note="Name no states."):
+    """Approve an answer with a note, revise it, reject the revision; return its id."""
+    approved_with_note(conn)
+    revise(
+        conn,
+        fake_client(answers=[revised(impact="Texas.")]),
+        revisions_due(conn),
+        OPUS,
+        1.0,
+    )
+    revision = newest_id(conn)
+    set_decision(conn, revision, "rejected", note)
+    conn.commit()
+    return revision
+
+
+def test_a_rewrite_after_a_rejection_has_its_own_instructions_and_version():
+    assert REDRAFT_SYSTEM_PROMPT == f"{SYSTEM_PROMPT}\n\n{REJECTION_TASK}"
+    assert RETRY_SYSTEM_PROMPT == f"{REVISION_SYSTEM_PROMPT}\n\n{REJECTION_TASK}"
+    versions = {
+        PROMPT_VERSION,
+        REVISION_PROMPT_VERSION,
+        REDRAFT_PROMPT_VERSION,
+        RETRY_PROMPT_VERSION,
+    }
+    assert len(versions) == 4
+
+
+@pytest.mark.parametrize("note", ["Too vague.", None])
+def test_a_rejected_draft_is_due_for_a_redraft_from_the_newest_summary(
+    committing_conn, note
+):
+    conn = committing_conn
+    rejected = rejected_draft(conn, note)
+
+    [row] = redrafts_due(conn)
+
+    assert row["kind"] == "redraft"
+    assert row["revised_from"] == rejected
+    assert (row["version_code"], row["summary_text"]) == ("49", "Last words.")
+    assert row["rejected_summary"] == "Plain words."
+    assert row["rejection_note"] == note
+    assert revisions_due(conn) == []
+
+
+@pytest.mark.parametrize("status", ["approved", "draft"])
+def test_a_rejection_replaced_by_an_approval_or_a_draft_is_not_redrafted(
+    committing_conn, status
+):
+    conn = committing_conn
+    rejected_draft(conn)
+    bill_id = conn.execute("SELECT bill_id FROM generated_summaries").fetchone()[0]
+    store(conn, bill_id, "49", "newer-prompt", answer(), Decimal("0.01"))
+    if status == "approved":
+        set_decision(conn, newest_id(conn), "approved")
+
+    assert redrafts_due(conn) == []
+
+
+def test_only_the_newest_rejection_of_a_bill_is_redrafted(committing_conn):
+    conn = committing_conn
+    first = rejected_draft(conn, "First note.")
+    set_decision(conn, first, "rejected", "First note.", days_ago=1)
+    bill_id = conn.execute("SELECT bill_id FROM generated_summaries").fetchone()[0]
+    store(conn, bill_id, "49", "newer-prompt", answer(), Decimal("0.01"))
+    set_decision(conn, newest_id(conn), "rejected", "Second note.")
+
+    [row] = redrafts_due(conn)
+    assert row["rejection_note"] == "Second note."
+
+
+def test_a_redraft_request_carries_the_rejected_text_and_the_note(committing_conn):
+    conn = committing_conn
+    rejected_draft(conn)
+    client = fake_client(answers=[answer(plain_summary="Redrafted.")])
+
+    revise(conn, client, redrafts_due(conn), OPUS, budget=1.0)
+
+    [request] = client.messages.sent
+    assert request["system"] == REDRAFT_SYSTEM_PROMPT
+    message = request["messages"][0]["content"]
+    assert "<crs_summary>\nLast words.\n</crs_summary>" in message
+    assert '<rejected_text>\n{\n  "plain_summary": "Plain words."' in message
+    assert "<rejection_note>\nToo vague.\n</rejection_note>" in message
+    assert "<approved_text>" not in message
+
+
+def test_a_redraft_with_no_note_has_no_note_tag(committing_conn):
+    conn = committing_conn
+    rejected_draft(conn, note=None)
+    client = fake_client(answers=[answer()])
+
+    revise(conn, client, redrafts_due(conn), OPUS, budget=1.0)
+
+    message = client.messages.sent[0]["messages"][0]["content"]
+    assert "<rejected_text>" in message
+    assert "<rejection_note>" not in message
+
+
+def test_a_redraft_is_stored_as_a_draft_that_points_back(committing_conn, capsys):
+    conn = committing_conn
+    rejected = rejected_draft(conn)
+    client = fake_client(answers=[answer(plain_summary="Redrafted.")])
+
+    revise(conn, client, redrafts_due(conn), OPUS, budget=1.0)
+
+    row = conn.execute(
+        "SELECT status, prompt_version, revised_from, source_version_code,"
+        " plain_summary FROM generated_summaries WHERE revised_from IS NOT NULL"
+    ).fetchone()
+    assert row == ("draft", REDRAFT_PROMPT_VERSION, rejected, "49", "Redrafted.")
+    shown = capsys.readouterr().out
+    assert "H.R. 9999, redraft:" in shown
+    assert "Redrafted." in shown
+
+
+def test_a_rejection_is_redrafted_once_and_a_rejected_redraft_again(committing_conn):
+    conn = committing_conn
+    rejected_draft(conn)
+    revise(conn, fake_client(answers=[answer()]), redrafts_due(conn), OPUS, 1.0)
+    # The redraft is waiting for review, so nothing is due.
+    assert redrafts_due(conn) == []
+
+    redraft = newest_id(conn)
+    set_decision(conn, redraft, "rejected")
+    [row] = redrafts_due(conn)
+    assert row["revised_from"] == redraft
+
+    # The second redraft shares the bill, CRS version, prompt and model with
+    # the first, and is stored because it points back to a different row.
+    revise(conn, fake_client(answers=[answer()]), [row], OPUS, 1.0)
+    assert len(stored_rows(conn)) == 3
+
+
+def test_a_rejected_revision_with_a_note_is_due_for_another_try(committing_conn):
+    conn = committing_conn
+    revision = rejected_revision(conn)
+
+    [row] = revisions_due(conn)
+
+    assert row["kind"] == "retry"
+    assert row["revised_from"] == revision
+    assert (row["plain_summary"], row["impact"]) == ("Plain words.", "It does you.")
+    assert row["review_note"] == "Say sex assigned at birth."
+    assert (row["rejected_impact"], row["rejection_note"]) == (
+        "Texas.",
+        "Name no states.",
+    )
+    # The approved text stands for the bill, so it is not redrafted.
+    assert redrafts_due(conn) == []
+
+
+def test_a_rejected_revision_with_no_note_keeps_the_approved_text(committing_conn):
+    conn = committing_conn
+    rejected_revision(conn, note=None)
+
+    assert revisions_due(conn) == []
+    assert redrafts_due(conn) == []
+
+
+def test_a_rejected_revision_older_than_the_live_approved_text_is_left_alone(
+    committing_conn,
+):
+    conn = committing_conn
+    rejected_revision(conn)
+    bill_id = conn.execute("SELECT bill_id FROM generated_summaries").fetchone()[0]
+    # A newer draft was approved after the revision was rejected, so the
+    # rejected revision was not a try at the text that is live now.
+    store(conn, bill_id, "00", "newer-prompt", answer(), Decimal("0.01"))
+    newer = newest_id(conn)
+    set_decision(conn, newer, "approved", "Shorter, please.")
+
+    [row] = revisions_due(conn)
+    assert (row["kind"], row["revised_from"]) == ("revision", newer)
+
+
+def test_no_other_try_while_a_draft_is_waiting(committing_conn):
+    conn = committing_conn
+    rejected_revision(conn)
+    bill_id = conn.execute("SELECT bill_id FROM generated_summaries").fetchone()[0]
+    store(conn, bill_id, "00", "newer-prompt", answer(), Decimal("0.01"))
+
+    assert revisions_due(conn) == []
+
+
+def test_another_try_carries_both_notes_and_points_back(committing_conn, capsys):
+    conn = committing_conn
+    revision = rejected_revision(conn)
+    capsys.readouterr()
+    client = fake_client(answers=[revised(impact="It does you more.")])
+
+    revise(conn, client, revisions_due(conn), OPUS, budget=1.0)
+
+    [request] = client.messages.sent
+    assert request["system"] == RETRY_SYSTEM_PROMPT
+    message = request["messages"][0]["content"]
+    assert '<approved_text>\n{\n  "plain_summary": "Plain words."' in message
+    assert "<editor_note>\nSay sex assigned at birth.\n</editor_note>" in message
+    assert '"impact": "Texas."\n}\n</rejected_text>' in message
+    assert "<rejection_note>\nName no states.\n</rejection_note>" in message
+    row = conn.execute(
+        "SELECT status, prompt_version FROM generated_summaries WHERE revised_from = %s",
+        [revision],
+    ).fetchone()
+    assert row == ("draft", RETRY_PROMPT_VERSION)
+    # Changes are marked against the approved text, not the rejected try.
+    assert "It does [-you.-] {+you more.+}" in capsys.readouterr().out
+
+
+def test_one_run_writes_each_kind_under_its_own_instructions(committing_conn):
+    conn = committing_conn
+    approved_with_note(conn)
+    other = add_bill_with(conn, INTRODUCED, number=1111)
+    store(conn, other, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
+    set_decision(conn, newest_id(conn), "rejected", "Too vague.")
+    conn.commit()
+    rows = revisions_due(conn) + redrafts_due(conn)
+    client = fake_client(answers=[revised(), answer()])
+
+    revise(conn, client, rows, OPUS, budget=1.0)
+
+    assert [request["system"] for request in client.messages.sent] == [
+        REVISION_SYSTEM_PROMPT,
+        REDRAFT_SYSTEM_PROMPT,
+    ]
+    versions = conn.execute(
+        "SELECT prompt_version FROM generated_summaries"
+        " WHERE revised_from IS NOT NULL ORDER BY id"
+    ).fetchall()
+    assert versions == [(REVISION_PROMPT_VERSION,), (REDRAFT_PROMPT_VERSION,)]
+
+
+def test_review_shows_a_redraft_in_full_with_the_note_on_the_rejection(
+    committing_conn, capsys
+):
+    conn = committing_conn
+    rejected_draft(conn)
+    client = fake_client(answers=[answer(plain_summary="Redrafted.")])
+    revise(conn, client, redrafts_due(conn), OPUS, budget=1.0)
+    capsys.readouterr()
+
+    asked = []
+    review(conn, ask=lambda prompt: asked.append(prompt) or "q")
+
+    shown = capsys.readouterr().out
+    assert "Redraft. The last draft was rejected" in shown
+    assert 'with note: "Too vague."' in shown
+    assert "Redrafted." in shown
+    assert "[r]eject (it is redrafted again)" in asked[0]
+
+
+def test_review_shows_another_try_with_both_notes_and_the_changes(
+    committing_conn, capsys
+):
+    conn = committing_conn
+    rejected_revision(conn)
+    client = fake_client(answers=[revised(impact="It does you more.")])
+    revise(conn, client, revisions_due(conn), OPUS, budget=1.0)
+    capsys.readouterr()
+
+    review(conn, ask=lambda prompt: "q")
+
+    shown = capsys.readouterr().out
+    assert 'The note on the approved text: "Say sex assigned at birth."' in shown
+    assert 'with note: "Name no states."' in shown
+    assert "It does [-you.-] {+you more.+}" in shown
 
 
 # Where the API can be reached from.
