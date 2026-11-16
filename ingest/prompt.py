@@ -6,7 +6,9 @@ docs/editorial-policy.md, so the rules readers see are the rules Claude
 follows. The policy's other sections (where the words come from, corrections)
 are about the site, not the writing, so editing them does not change the
 instructions or their version. A revision of approved text gets the same
-instructions plus REVISION_TASK.
+instructions plus REVISION_TASK. A rewrite after a rejection gets
+REJECTION_TASK on top: a redraft adds it to the drafting instructions, and
+another try at a revision adds it to the revision instructions.
 """
 
 import hashlib
@@ -157,6 +159,19 @@ words to use. Every rule above still applies to what you change."""
 
 REVISION_SYSTEM_PROMPT = f"{SYSTEM_PROMPT}\n\n{REVISION_TASK}"
 
+REJECTION_TASK = """\
+An earlier answer for this bill was rejected by an editor. You will also get \
+it, between <rejected_text> tags, and the editor's note on why, between \
+<rejection_note> tags, when the editor wrote one. Follow what the note asks, \
+and do not repeat the problems it names. When there is no note, write your \
+answer fresh instead of rewording the rejected one. Every rule above still \
+applies."""
+
+# A redraft replaces a rejected draft when nothing approved stands for the
+# bill. Another try at a revision replaces a rejected revision of approved text.
+REDRAFT_SYSTEM_PROMPT = f"{SYSTEM_PROMPT}\n\n{REJECTION_TASK}"
+RETRY_SYSTEM_PROMPT = f"{REVISION_SYSTEM_PROMPT}\n\n{REJECTION_TASK}"
+
 
 def fingerprint(prompt: str) -> str:
     """Return a short fingerprint of a prompt.
@@ -170,3 +185,5 @@ def fingerprint(prompt: str) -> str:
 
 PROMPT_VERSION = fingerprint(SYSTEM_PROMPT)
 REVISION_PROMPT_VERSION = fingerprint(REVISION_SYSTEM_PROMPT)
+REDRAFT_PROMPT_VERSION = fingerprint(REDRAFT_SYSTEM_PROMPT)
+RETRY_PROMPT_VERSION = fingerprint(RETRY_SYSTEM_PROMPT)

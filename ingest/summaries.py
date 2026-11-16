@@ -19,9 +19,9 @@ comparing models. submit sends them through the Batch API at half price, and
 collect stores the answers once the batch has ended. sample and submit refuse
 to send anything when the most it could cost is over --budget dollars.
 --new-only keeps only bills that have no generated summary at all, of any
-prompt, model or status, which is what the nightly job drafts: a bill that
-was rejected, or whose CRS summary has moved to a newer stage, is left for a
-person to redraft on purpose.
+prompt, model or status, which is what the nightly job drafts: a bill whose
+CRS summary has moved to a newer stage is left for a person to redraft on
+purpose, and a rejected one is redrafted by revise.
 
 A bill is written up from its newest CRS summary, once per prompt version and
 model. Each answer is stored as a draft. review shows the drafts one at a
@@ -34,6 +34,13 @@ means the text is live, but the note asks for a change: revise rewrites it,
 changing only what the note asks, and the next review shows that revision
 first with its changes marked. review --previous first offers to undo any
 decision from the last UNDO_DAYS days.
+
+A rejection asks for a rewrite too. When nothing approved stands for the
+bill, revise redrafts it from the newest CRS summary, given the rejected text
+and its note, if any. When the rejected row was a revision, a note asks for
+another try at revising the approved text, and no note means keep that text
+as it is. Each rejection is rewritten once, and a rejected rewrite is itself
+a rejection, so every try is a decision someone made.
 """
 
 import argparse
@@ -49,6 +56,10 @@ from app.bills import bill_label
 from ingest.db import connect
 from ingest.prompt import (
     PROMPT_VERSION,
+    REDRAFT_PROMPT_VERSION,
+    REDRAFT_SYSTEM_PROMPT,
+    RETRY_PROMPT_VERSION,
+    RETRY_SYSTEM_PROMPT,
     REVISION_PROMPT_VERSION,
     REVISION_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
@@ -160,8 +171,11 @@ ON CONFLICT DO NOTHING;
 # change. It is due for a revision until it has one, whatever that revision's
 # fate, so a rejected revision is not tried again every night.
 REVISIONS_DUE_SQL = """
-SELECT p.id AS revised_from, p.bill_id, p.source_version_code AS version_code,
+SELECT 'revision' AS kind,
+       p.id AS revised_from, p.bill_id, p.source_version_code AS version_code,
        p.plain_summary, p.impact, p.review_note,
+       NULL::text AS rejected_summary, NULL::text AS rejected_impact,
+       NULL::text AS rejection_note,
        b.congress, b.bill_type, b.bill_number, b.title,
        s.action_desc, s.action_on, s.summary_text
 FROM generated_summaries p
@@ -179,12 +193,118 @@ ORDER BY p.reviewed_at
 LIMIT %(limit)s;
 """
 
-# Revisions come first, each with the approved text and note it answers.
+# A bill's newest decision is the one a rewrite answers, so only its newest
+# rejection counts. Both queries below start from it.
+NEWEST_REJECTION_CTE = """
+WITH newest_rejection AS (
+    SELECT DISTINCT ON (bill_id) *
+    FROM generated_summaries
+    WHERE status = 'rejected'
+      AND source = 'crs_summary'
+    ORDER BY bill_id, reviewed_at DESC, id DESC
+)
+"""
+
+# A rejected revision with a note asks for another try at revising the
+# approved text that is live, the newest approved row, as the site shows it.
+# It counts only when that text is older than the rejected revision, so the
+# revision was a try at it, and when no draft is waiting. A rejected revision
+# with no note means keep the approved text as it is. The new try points back
+# to the rejected revision, which is rewritten once.
+RETRIES_DUE_SQL = (
+    NEWEST_REJECTION_CTE
+    + """
+SELECT 'retry' AS kind,
+       r.id AS revised_from, a.bill_id, a.source_version_code AS version_code,
+       a.plain_summary, a.impact, a.review_note,
+       r.plain_summary AS rejected_summary, r.impact AS rejected_impact,
+       r.review_note AS rejection_note,
+       b.congress, b.bill_type, b.bill_number, b.title,
+       s.action_desc, s.action_on, s.summary_text
+FROM newest_rejection r
+JOIN LATERAL (
+    SELECT *
+    FROM generated_summaries
+    WHERE bill_id = r.bill_id
+      AND source = 'crs_summary'
+      AND status = 'approved'
+    ORDER BY generated_at DESC, id DESC
+    LIMIT 1
+) a ON true
+JOIN bills b ON b.id = r.bill_id
+JOIN bill_summaries s
+  ON s.bill_id = a.bill_id
+ AND s.version_code = a.source_version_code
+WHERE r.revised_from IS NOT NULL
+  AND r.review_note IS NOT NULL
+  AND a.review_note IS NOT NULL
+  AND (r.generated_at, r.id) > (a.generated_at, a.id)
+  AND NOT EXISTS (
+      SELECT 1 FROM generated_summaries c WHERE c.revised_from = r.id
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM generated_summaries d
+      WHERE d.bill_id = r.bill_id
+        AND d.source = 'crs_summary'
+        AND d.status = 'draft'
+  )
+ORDER BY r.reviewed_at
+LIMIT %(limit)s;
+"""
+)
+
+# A rejected row is due for a redraft when nothing else stands for its bill:
+# no approved text and no draft waiting. A bill whose rejection was later
+# replaced by another draft or an approval is left alone. The redraft is
+# written from the bill's newest CRS summary, with or without a note, and
+# points back to the rejection, which is rewritten once. Without that pointer,
+# a redraft of a rejected redraft would match the first one's bill, CRS
+# version, prompt and model, and the one-answer-each index would quietly
+# drop it.
+REDRAFTS_DUE_SQL = (
+    NEWEST_REJECTION_CTE
+    + """
+SELECT 'redraft' AS kind,
+       r.id AS revised_from, r.bill_id, s.version_code,
+       r.plain_summary AS rejected_summary, r.impact AS rejected_impact,
+       r.review_note AS rejection_note,
+       b.congress, b.bill_type, b.bill_number, b.title,
+       s.action_desc, s.action_on, s.summary_text
+FROM newest_rejection r
+JOIN bills b ON b.id = r.bill_id
+JOIN LATERAL (
+    SELECT version_code, action_desc, action_on, summary_text
+    FROM bill_summaries
+    WHERE bill_id = r.bill_id
+    ORDER BY action_on DESC, version_code DESC
+    LIMIT 1
+) s ON true
+WHERE NOT EXISTS (
+      SELECT 1 FROM generated_summaries c WHERE c.revised_from = r.id
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM generated_summaries o
+      WHERE o.bill_id = r.bill_id
+        AND o.source = 'crs_summary'
+        AND o.status IN ('approved', 'draft')
+  )
+ORDER BY r.reviewed_at
+LIMIT %(limit)s;
+"""
+)
+
+# Rewrites come first, each with the row it answers (its parent) and the
+# approved text live on the site, if any.
 DRAFTS_SQL = """
 SELECT g.id, g.plain_summary, g.impact, g.model, g.prompt_version, g.cost_usd,
        g.review_note, g.revised_from,
-       p.plain_summary AS approved_summary, p.impact AS approved_impact,
-       p.review_note AS approved_note, p.reviewed_at AS approved_at,
+       p.status AS parent_status, p.plain_summary AS parent_summary,
+       p.impact AS parent_impact, p.review_note AS parent_note,
+       p.reviewed_at AS parent_reviewed_at,
+       a.plain_summary AS live_summary, a.impact AS live_impact,
+       a.review_note AS live_note,
        b.congress, b.bill_type, b.bill_number, b.title, b.source_url,
        s.action_desc, s.action_on, s.summary_text
 FROM generated_summaries g
@@ -193,6 +313,15 @@ JOIN bill_summaries s
   ON s.bill_id = g.bill_id
  AND s.version_code = g.source_version_code
 LEFT JOIN generated_summaries p ON p.id = g.revised_from
+LEFT JOIN LATERAL (
+    SELECT plain_summary, impact, review_note
+    FROM generated_summaries
+    WHERE bill_id = g.bill_id
+      AND source = 'crs_summary'
+      AND status = 'approved'
+    ORDER BY generated_at DESC, id DESC
+    LIMIT 1
+) a ON true
 WHERE g.status = 'draft'
   AND g.source = 'crs_summary'
 ORDER BY g.revised_from IS NULL, b.congress, b.bill_type, b.bill_number,
@@ -495,65 +624,107 @@ def collect(conn, client, batch_id: str) -> Decimal | None:
 
 
 def revisions_due(conn, limit: int | None = None) -> list[dict]:
-    """Return the approved rows with a note and no revision yet, oldest decision first."""
+    """Return the approved rows to revise, oldest decision first.
+
+    First the approved rows with a note and no revision yet, then the rejected
+    revisions whose note asks for another try at the approved text.
+    """
+    params = {"limit": limit}
     with conn.cursor(row_factory=dict_row) as cur:
-        return cur.execute(REVISIONS_DUE_SQL, {"limit": limit}).fetchall()
+        revisions = cur.execute(REVISIONS_DUE_SQL, params).fetchall()
+        retries = cur.execute(RETRIES_DUE_SQL, params).fetchall()
+    return (revisions + retries)[:limit]
 
 
-def revision_params(row: dict, model: str) -> dict:
-    """Return the request to revise one approved row: the bill, its text and the note."""
-    approved = json.dumps(
-        {"plain_summary": row["plain_summary"], "impact": row["impact"]}, indent=2
-    )
-    content = (
-        f"{user_message(row)}\n"
-        f"\n<approved_text>\n{approved}\n</approved_text>\n"
-        f"\n<editor_note>\n{row['review_note']}\n</editor_note>"
-    )
+def redrafts_due(conn, limit: int | None = None) -> list[dict]:
+    """Return the rejected rows to redraft, the bills with nothing else to show."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(REDRAFTS_DUE_SQL, {"limit": limit}).fetchall()
+
+
+# The instructions each kind of rewrite is written under, and their version.
+REWRITE_PROMPTS = {
+    "revision": (REVISION_SYSTEM_PROMPT, REVISION_PROMPT_VERSION),
+    "retry": (RETRY_SYSTEM_PROMPT, RETRY_PROMPT_VERSION),
+    "redraft": (REDRAFT_SYSTEM_PROMPT, REDRAFT_PROMPT_VERSION),
+}
+
+
+def texts(plain_summary: str, impact: str) -> str:
+    """Return the two texts as the JSON Claude answers in, for quoting back to it."""
+    return json.dumps({"plain_summary": plain_summary, "impact": impact}, indent=2)
+
+
+def rewrite_params(row: dict, model: str) -> dict:
+    """Return the request for one rewrite, given what it answers.
+
+    A revision gets the approved text and its note. Another try at a revision
+    gets those plus the rejected revision and the note on it. A redraft gets
+    the rejected text and its note, if any.
+    """
+    content = user_message(row)
+    if row["kind"] != "redraft":
+        content += (
+            f"\n\n<approved_text>\n{texts(row['plain_summary'], row['impact'])}\n"
+            f"</approved_text>\n"
+            f"\n<editor_note>\n{row['review_note']}\n</editor_note>"
+        )
+    if row["kind"] != "revision":
+        rejected = texts(row["rejected_summary"], row["rejected_impact"])
+        content += f"\n\n<rejected_text>\n{rejected}\n</rejected_text>"
+        if row["rejection_note"]:
+            content += (
+                f"\n\n<rejection_note>\n{row['rejection_note']}\n</rejection_note>"
+            )
+    system, _ = REWRITE_PROMPTS[row["kind"]]
     return request_params(row, model) | {
-        "system": REVISION_SYSTEM_PROMPT,
+        "system": system,
         "messages": [{"role": "user", "content": content}],
     }
 
 
 def revise(conn, client, rows: list[dict], model: str, budget: float) -> Decimal:
-    """Rewrite each approved row to address its note, storing each revision as a draft.
+    """Write each rewrite that is due, storing each as a draft that points back.
 
-    Sent one at a time, like sample, so a run started overnight is done in
-    minutes. Returns what the requests cost.
+    The rows are revisions, other tries at a revision, and redrafts, from
+    revisions_due and redrafts_due. Sent one at a time, like sample, so a run
+    started overnight is done in minutes. Returns what the requests cost.
     """
     if model not in PRICES:
         raise ValueError(f"No price is known for {model}.")
 
-    requests = [revision_params(row, model) for row in rows]
+    requests = [rewrite_params(row, model) for row in rows]
     tokens = measure(client, requests, model)
     check_budget(tokens, model, batch=False, budget=budget)
     spent = Decimal(0)
-    with record_run(conn, JOB, f"{SOURCE} {model} revisions") as run:
+    with record_run(conn, JOB, f"{SOURCE} {model} rewrites") as run:
         for row, request in zip(rows, requests, strict=True):
             message = client.messages.create(**request)
             cost = actual_cost(message.usage, model, batch=False)
             spent += cost
+            _, prompt_version = REWRITE_PROMPTS[row["kind"]]
             run.rows_loaded += store(
                 conn,
                 row["bill_id"],
                 row["version_code"],
-                REVISION_PROMPT_VERSION,
+                prompt_version,
                 message,
                 cost,
                 revised_from=row["revised_from"],
             )
             conn.commit()
             label = bill_label(row["bill_type"], row["bill_number"])
-            print(f"  {label}: ${cost:.4f}", flush=True)
+            print(f"  {label}, {row['kind']}: ${cost:.4f}", flush=True)
             answer = read_answer(message)
-            if answer is not None:
-                print(
-                    f"\n{marked_changes(row['plain_summary'], answer['plain_summary'])}"
-                )
-                print(
-                    f"\nHow this does you:\n{marked_changes(row['impact'], answer['impact'])}\n"
-                )
+            if answer is None:
+                continue
+            if row["kind"] == "redraft":
+                print(f"\n{answer['plain_summary']}\n")
+                print(f"How this does you:\n{answer['impact']}\n", flush=True)
+            else:
+                summary = marked_changes(row["plain_summary"], answer["plain_summary"])
+                impact = marked_changes(row["impact"], answer["impact"])
+                print(f"\n{summary}\n\nHow this does you:\n{impact}\n", flush=True)
     print(f"Spent ${spent:.4f}.")
     return spent
 
@@ -579,28 +750,74 @@ def local_time(moment) -> str:
     return f"{moment.astimezone():%Y-%m-%d %H:%M}"
 
 
-def show_revision(draft: dict) -> None:
-    """Print a revision under the note it answers, with what changed marked."""
+def rewrite_kind(draft: dict) -> str | None:
+    """Return what a draft rewrites: a revision, another try at one, a redraft, or None."""
+    if draft["revised_from"] is None:
+        return None
+    if draft["parent_status"] == "approved":
+        return "revision"
+    # The parent was rejected: a try at approved text if some is live.
+    return "retry" if draft["live_summary"] is not None else "redraft"
+
+
+def show_changes(old_summary: str, old_impact: str, draft: dict) -> None:
+    """Print a draft's two texts with what changed from the old ones marked."""
     print(
-        f"\nRevision. Approved {local_time(draft['approved_at'])}, "
-        f'with note: "{draft["approved_note"]}"'
-    )
-    print(
-        f"\nRegenerated after note ({draft['model']}, ${draft['cost_usd']:.4f}), "
+        f"\nRegenerated ({draft['model']}, ${draft['cost_usd']:.4f}), "
         "changes marked [-removed-] {+added+}:"
     )
-    print(marked_changes(draft["approved_summary"], draft["plain_summary"]))
+    print(marked_changes(old_summary, draft["plain_summary"]))
     print("\nHow this does you:")
-    print(marked_changes(draft["approved_impact"], draft["impact"]))
+    print(marked_changes(old_impact, draft["impact"]))
+
+
+def show_rewrite(draft: dict, kind: str) -> None:
+    """Print a rewrite under the decision and note it answers."""
+    decided = local_time(draft["parent_reviewed_at"])
+    if kind == "revision":
+        print(f'\nRevision. Approved {decided}, with note: "{draft["parent_note"]}"')
+        show_changes(draft["parent_summary"], draft["parent_impact"], draft)
+    elif kind == "retry":
+        print(
+            f'\nAnother try at a revision. The note on the approved text: "{draft["live_note"]}"'
+        )
+        print(
+            f'The last try was rejected {decided}, with note: "{draft["parent_note"]}"'
+        )
+        show_changes(draft["live_summary"], draft["live_impact"], draft)
+    else:
+        note = draft["parent_note"]
+        why = f'with note: "{note}"' if note else "with no note"
+        print(f"\nRedraft. The last draft was rejected {decided}, {why}")
+        show_text(draft)
+
+
+def show_text(draft: dict) -> None:
+    """Print a draft's two texts in full."""
+    print(f"\nPlain-language summary ({draft['model']}, ${draft['cost_usd']:.4f}):")
+    print(draft["plain_summary"])
+    print("\nHow this does you:")
+    print(draft["impact"])
+
+
+# What each choice does, by what the draft rewrites.
+CHOICES = {
+    None: "[a]pprove, [r]eject (it is redrafted), [s]kip, [q]uit",
+    "redraft": "[a]pprove, [r]eject (it is redrafted again), [s]kip, [q]uit",
+    "revision": "[a]pprove revision, [r]eject (keep the approved text; "
+    "a note asks for another try), [s]kip, [q]uit",
+}
+CHOICES["retry"] = CHOICES["revision"]
 
 
 def review(conn, ask=input) -> int:
     """Show each draft beside its CRS summary and record the decision. Return how many were decided.
 
-    Revisions come first. a approves, r rejects, s skips to the next, q stops.
+    Rewrites come first. a approves, r rejects, s skips to the next, q stops.
     Approving a revision puts it on the site in place of the text it revises;
-    rejecting one leaves that text as it is. Each decision is committed as it
-    is made, so stopping partway loses nothing.
+    rejecting one leaves that text as it is. A rejected draft is redrafted by
+    the next revise. Each decision is committed as it is made, so stopping
+    partway loses nothing.
     """
     with conn.cursor(row_factory=dict_row) as cur:
         drafts = cur.execute(DRAFTS_SQL).fetchall()
@@ -612,18 +829,12 @@ def review(conn, ask=input) -> int:
         print(f"{draft['source_url']}")
         print(f"\nCRS summary ({draft['action_desc']}, {draft['action_on']}):")
         print(draft["summary_text"])
-        if draft["revised_from"]:
-            show_revision(draft)
-            choices = "[a]pprove revision, [r]eject (keep the original), [s]kip, [q]uit"
+        kind = rewrite_kind(draft)
+        if kind is None:
+            show_text(draft)
         else:
-            print(
-                f"\nPlain-language summary ({draft['model']}, "
-                f"${draft['cost_usd']:.4f}):"
-            )
-            print(draft["plain_summary"])
-            print("\nHow this does you:")
-            print(draft["impact"])
-            choices = "[a]pprove, [r]eject, [s]kip, [q]uit"
+            show_rewrite(draft, kind)
+        choices = CHOICES[kind]
         if draft["review_note"]:
             print(f"\nEarlier note: {draft['review_note']}")
 
@@ -752,11 +963,18 @@ def main() -> None:
             collect(conn, client, args.batch_id)
             return
         if args.command == "revise":
-            rows = revisions_due(conn, args.limit)
+            rows = (revisions_due(conn) + redrafts_due(conn))[: args.limit]
             if not rows:
-                print("No approved summaries with a note are waiting for a revision.")
+                print(
+                    "No approved summary with a note, and no rejected one, "
+                    "is waiting for a rewrite."
+                )
                 return
-            print(f"Prompt version {REVISION_PROMPT_VERSION}, model {args.model}.")
+            print(
+                f"Prompt versions: revision {REVISION_PROMPT_VERSION}, "
+                f"another try {RETRY_PROMPT_VERSION}, "
+                f"redraft {REDRAFT_PROMPT_VERSION}; model {args.model}."
+            )
             try:
                 revise(conn, client, rows, args.model, args.budget)
             except OverBudget as exc:
