@@ -143,7 +143,7 @@ The site runs on [Render](https://render.com), described in `render.yaml` (a Ren
 | `dopolitics` (web, Starter) | The app. Built with `uv sync --frozen --no-dev` (exactly the versions in `uv.lock`, without test tools), Python from `.python-version`. Each deploy runs `alembic upgrade head` first, then starts one uvicorn worker. Deploys automatically when a commit to `main` passes CI; the cron jobs rebuild on the same rule. Serves `dopolitics.org`. |
 | `dopolitics-db` (Postgres 18, 1 GB RAM, 5 GB disk) | Reachable only from Render's private network: its IP allow list is empty. |
 | `load-votes`, `load-bills` | Daily new roll calls, then the bills they name. |
-| `draft-new-summaries`, `revise-summaries` | Daily drafts for bills with none yet (at most 20 and $1.50), and rewrites: approved summaries whose note asks for a change, and rejected ones. |
+| `draft-new-summaries`, `revise-summaries` | Daily drafts for new bills and bills that moved to a newer stage (at most 20 and $1.50), and rewrites: approved summaries whose note asks for a change, and rejected ones. |
 | `load-members-and-officials`, `load-photos` | Weekly and monthly. |
 
 Each service gets only the secrets it uses: the web app has only the database URL, and the Congress.gov and Claude API keys sit in two environment groups attached only to the jobs that call those APIs. Their values are entered in the Render Dashboard and never appear in the file. Cron schedules are in UTC, at hours that are overnight in every US time zone.
@@ -355,7 +355,7 @@ uv run --env-file .env python -m ingest.summaries revise
 - `sample` sends requests one at a time and prints each answer, for tuning the prompt.
 - `submit` sends them through the Batch API at half price, and `collect` stores the answers once the batch has ended.
 - `sample`, `submit` and `revise` refuse to send anything when the most it could cost is over `--budget` dollars.
-- `--new-only` keeps only bills that have no generated summary at all, of any prompt, model or status. It is what the nightly job runs, so new bills get a draft the next morning without an older prompt's drafts or a bill whose CRS summary moved to a newer stage being written again. Those stay a person's decision. A rejected bill is redrafted by `revise` (see Rejections below).
+- `--new-only` keeps only bills with nothing written from their newest CRS summary: bills with no generated summary at all, and bills whose approved text or draft came from an older stage (written from Introduced when the newest is Public Law, say). It is what the nightly job runs, so new bills get a draft the next morning and a bill that moved forward gets one from its new stage, without an older prompt's drafts being written again. The site keeps showing approved text until the newer draft is approved. A rejected bill is redrafted by `revise` (see Rejections below).
 
 **The prompt version.** It is a 12-character fingerprint of the full instructions, so any edit to the prompt or to the policy's writing rules gives a new version (an edit to another section of the policy does not), and every stored answer names the exact instructions it was written under. A new version makes every bill due again, except a bill whose summary is already approved. Naming a bill with `--bill` writes it again anyway.
 

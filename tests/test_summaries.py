@@ -282,12 +282,40 @@ def test_new_only_leaves_out_a_reviewed_bill_whatever_the_decision(conn, status)
     assert bills_to_write(conn, OPUS, new_only=True) == []
 
 
-def test_new_only_leaves_out_a_bill_whose_summary_moved_to_a_newer_stage(conn):
-    bill_id = add_bill_with(conn, INTRODUCED)
-    store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
-    add_bill(conn, 9999, summaries=[summary(*INTRODUCED), summary(*PASSED)])
+@pytest.mark.parametrize("status", ["approved", "draft"])
+def test_new_only_drafts_a_bill_whose_summary_moved_to_a_newer_stage(conn, status):
+    # Written from Introduced; the newest CRS summary is now Public Law.
+    bill_id = add_bill_with(conn, INTRODUCED, PASSED)
+    store(conn, bill_id, "00", "older-prompt", answer(), Decimal("0.01"))
+    if status == "approved":
+        decide(conn, "approved")
 
-    assert len(bills_to_write(conn, OPUS)) == 1
+    [bill] = bills_to_write(conn, OPUS, new_only=True)
+
+    assert (bill["version_code"], bill["summary_text"]) == ("49", "Last words.")
+
+
+def test_new_only_leaves_a_newer_stage_once_anything_is_written_from_it(conn):
+    bill_id = add_bill_with(conn, INTRODUCED, PASSED)
+    store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
+    decide(conn, "approved")
+    # A draft from the newest stage under another prompt, since rejected: it
+    # was written and decided, so the nightly job does not write it again.
+    store(conn, bill_id, "49", "older-prompt", answer(), Decimal("0.01"))
+    conn.execute(
+        "UPDATE generated_summaries SET status = 'rejected', reviewed_at = now()"
+        " WHERE source_version_code = '49'"
+    )
+
+    assert bills_to_write(conn, OPUS, new_only=True) == []
+
+
+def test_new_only_leaves_a_bill_with_only_rejections_to_revise(conn):
+    # Rejected from an older stage: revise redrafts it from the newest one.
+    bill_id = add_bill_with(conn, INTRODUCED, PASSED)
+    store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
+    decide(conn, "rejected", "Too vague.")
+
     assert bills_to_write(conn, OPUS, new_only=True) == []
 
 

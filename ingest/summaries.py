@@ -18,10 +18,11 @@ cost. sample sends requests one at a time, for tuning the prompt and
 comparing models. submit sends them through the Batch API at half price, and
 collect stores the answers once the batch has ended. sample and submit refuse
 to send anything when the most it could cost is over --budget dollars.
---new-only keeps only bills that have no generated summary at all, of any
-prompt, model or status, which is what the nightly job drafts: a bill whose
-CRS summary has moved to a newer stage is left for a person to redraft on
-purpose, and a rejected one is redrafted by revise.
+--new-only keeps only bills with nothing written from their newest CRS
+summary, which is what the nightly job drafts: new bills, and bills whose
+approved text or draft came from an older stage, such as Introduced when the
+newest is Public Law. An older prompt's drafts are not written again, and a
+rejected bill is redrafted by revise.
 
 A bill is written up from its newest CRS summary, once per prompt version and
 model. Each answer is stored as a draft. review shows the drafts one at a
@@ -133,11 +134,30 @@ WHERE (%(bills)s::text[] IS NULL
         AND g.prompt_version = %(prompt_version)s
         AND g.model = %(model)s
   )
-  -- With new_only, a bill that has any generated summary at all is left out:
-  -- a draft, an approval or a rejection, from any prompt, model or stage.
-  AND (NOT %(new_only)s OR NOT EXISTS (
-      SELECT 1 FROM generated_summaries n WHERE n.bill_id = b.id
-  ))
+  -- With new_only, only bills with nothing written from their newest CRS
+  -- summary: a bill with no generated summary at all, or one whose approved
+  -- text or draft came from an older stage, such as Introduced when the
+  -- newest is Public Law. A bill with any row from its newest summary, of
+  -- any prompt, model or status, is left out, and so is one with only
+  -- rejections, which revise redrafts.
+  AND (NOT %(new_only)s
+       OR NOT EXISTS (
+           SELECT 1 FROM generated_summaries n WHERE n.bill_id = b.id
+       )
+       OR (EXISTS (
+               SELECT 1
+               FROM generated_summaries o
+               WHERE o.bill_id = b.id
+                 AND o.source = 'crs_summary'
+                 AND o.status IN ('approved', 'draft')
+           )
+           AND NOT EXISTS (
+               SELECT 1
+               FROM generated_summaries v
+               WHERE v.bill_id = b.id
+                 AND v.source = 'crs_summary'
+                 AND v.source_version_code = s.version_code
+           )))
   -- A bill already approved for this CRS version is done, whatever prompt
   -- wrote it, unless it was named on purpose.
   AND (%(bills)s::text[] IS NOT NULL OR NOT EXISTS (
@@ -379,8 +399,10 @@ def bills_to_write(
     A bill with an approved summary of that CRS version is left out. bills
     narrows the list to those named, such as ['119/hr/1'], and a bill named
     there is returned even if approved, so it can be rewritten on purpose.
-    new_only keeps only bills with no generated summary of any kind, so an
-    older prompt's drafts and rejections are never written again by accident.
+    new_only keeps only bills with nothing written from their newest CRS
+    summary: no generated summary at all, or approved text or a draft from an
+    older stage. An older prompt's drafts and rejections are never written
+    again by accident.
     """
     params = {
         "model": model,
@@ -918,8 +940,8 @@ def main() -> None:
         command.add_argument(
             "--new-only",
             action="store_true",
-            help="only bills with no generated summary at all, of any prompt, "
-            "model or status",
+            help="only bills with nothing written from their newest CRS summary: "
+            "new bills, and bills whose summary came from an older stage",
         )
         command.add_argument(
             "--budget",

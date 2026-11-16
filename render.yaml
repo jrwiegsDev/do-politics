@@ -107,8 +107,8 @@ projects:
                   property: connectionString
               - fromGroup: congress-api
 
-          # Plain-language drafts for bills that have none yet, daily, after
-          # the bills. At most 20 a night and $1.50; they show on the site
+          # Plain-language drafts for bills that have none yet, or whose CRS
+          # summary moved to a newer stage, daily, after the bills. At most 20 a night and $1.50; they show on the site
           # marked "Not yet reviewed by human eyes".
           - type: cron
             name: draft-new-summaries
