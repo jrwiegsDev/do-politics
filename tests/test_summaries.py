@@ -42,6 +42,7 @@ from ingest.summaries import (
     sample,
     store,
     submit,
+    within_budget,
     worst_case_cost,
 )
 
@@ -421,6 +422,83 @@ def test_sample_over_budget_sends_nothing(committing_conn):
 
     assert client.messages.sent == []
     assert stored_rows(conn) == []
+
+
+# Sending what fits: the nightly jobs leave what is over budget for the next run.
+
+# The most one request of 1,000 input tokens could cost on Opus, one at a
+# time: 1,000 x $4 + 2,000 x $20 per million tokens, $0.044.
+ONE = 0.044
+
+
+def test_requests_are_taken_in_order_while_they_fit():
+    assert within_budget([1000, 1000, 1000], OPUS, budget=2.5 * ONE) == [0, 1]
+
+
+def test_a_request_too_big_to_fit_is_left_and_later_ones_still_go():
+    # 50,000 tokens could cost $0.24 alone, so it waits; the next one fits.
+    assert within_budget([1000, 50_000, 1000], OPUS, budget=2.5 * ONE) == [0, 2]
+
+
+def test_nothing_is_taken_when_nothing_fits():
+    assert within_budget([50_000], OPUS, budget=ONE) == []
+
+
+def test_sample_sends_what_fits_and_leaves_the_rest(committing_conn, capsys):
+    conn = committing_conn
+    for number in (7777, 8888, 9999):
+        add_bill_with(conn, INTRODUCED, number=number)
+    client = fake_client(answers=[answer(), answer()], tokens=1000)
+
+    sample(conn, client, bills_to_write(conn, OPUS), OPUS, 2.5 * ONE, fit=True)
+
+    assert len(client.messages.sent) == 2
+    assert len(stored_rows(conn)) == 2
+    shown = capsys.readouterr().out
+    assert "1 left for the next run, to stay within the budget: H.R. 9999" in shown
+    # The next run takes the one left.
+    assert numbers(bills_to_write(conn, OPUS, new_only=True)) == [9999]
+
+
+def test_sample_that_fits_entirely_leaves_nothing(committing_conn, capsys):
+    conn = committing_conn
+    add_bill_with(conn, INTRODUCED)
+    client = fake_client(answers=[answer()], tokens=1000)
+
+    sample(conn, client, bills_to_write(conn, OPUS), OPUS, budget=1.0, fit=True)
+
+    assert len(client.messages.sent) == 1
+    assert "left for the next run" not in capsys.readouterr().out
+
+
+def test_revise_sends_what_fits_and_leaves_the_rest(committing_conn, capsys):
+    conn = committing_conn
+    for number in (7777, 8888, 9999):
+        bill_id = add_bill_with(conn, INTRODUCED, number=number)
+        store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
+    decide(conn, "rejected", "Too vague.")
+    conn.commit()
+    client = fake_client(answers=[answer()], tokens=1000)
+
+    revise(conn, client, redrafts_due(conn), OPUS, budget=1.5 * ONE, fit=True)
+
+    assert len(client.messages.sent) == 1
+    assert len(redrafts_due(conn)) == 2
+    assert "2 left for the next run" in capsys.readouterr().out
+
+
+def test_the_nightly_summary_jobs_send_what_fits():
+    blueprint = Path(__file__).resolve().parent.parent / "render.yaml"
+    commands = [
+        line.strip()
+        for line in blueprint.read_text().splitlines()
+        if "startCommand:" in line and "ingest.summaries" in line
+    ]
+
+    assert len(commands) == 2  # draft-new-summaries and revise-summaries
+    for command in commands:
+        assert "--budget " in command
+        assert command.endswith("--fit-budget")
 
 
 @pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal"])

@@ -8,16 +8,19 @@ Usage:
     uv run --env-file .env python -m ingest.summaries estimate --limit 10
     uv run --env-file .env python -m ingest.summaries sample --bill 119/hr/1
     uv run --env-file .env python -m ingest.summaries submit --budget 6
-    uv run --env-file .env python -m ingest.summaries sample --new-only --limit 20 --budget 1.50
+    uv run --env-file .env python -m ingest.summaries sample --new-only --limit 20 --budget 5 --fit-budget
     uv run --env-file .env python -m ingest.summaries collect msgbatch_...
-    uv run --env-file .env python -m ingest.summaries revise
+    uv run --env-file .env python -m ingest.summaries revise --budget 5 --fit-budget
     uv run --env-file .env python -m ingest.summaries review --previous
 
 estimate counts tokens, which is free, and prints the most the requests could
 cost. sample sends requests one at a time, for tuning the prompt and
 comparing models. submit sends them through the Batch API at half price, and
-collect stores the answers once the batch has ended. sample and submit refuse
-to send anything when the most it could cost is over --budget dollars.
+collect stores the answers once the batch has ended. sample, submit and
+revise refuse to send anything when the most it could cost is over --budget
+dollars. The nightly jobs add --fit-budget to sample and revise instead: they
+send what fits within the budget, in order, and leave the rest for the next
+night, so a busy night spreads over the nights after it rather than stalling.
 --new-only keeps only bills with nothing written from their newest CRS
 summary, which is what the nightly job drafts: new bills, and bills whose
 approved text or draft came from an older stage, such as Introduced when the
@@ -492,6 +495,48 @@ def check_budget(tokens: list[int], model: str, batch: bool, budget: float) -> N
         )
 
 
+def within_budget(tokens: list[int], model: str, budget: float) -> list[int]:
+    """Return which requests to send, in order, so the most they could cost stays within budget.
+
+    Each request is counted at its own worst case, one at a time. One that
+    would take the total past the budget is left out, and later, smaller ones
+    are still taken, so one very long bill cannot hold up the rest.
+    """
+    chosen, most = [], 0.0
+    for position, count in enumerate(tokens):
+        cost = worst_case_cost([count], model, batch=False)
+        if most + cost <= budget:
+            chosen.append(position)
+            most += cost
+    return chosen
+
+
+def fit_to_budget(
+    rows: list[dict], requests: list[dict], tokens: list[int], model: str, budget: float
+) -> tuple[list[dict], list[dict]]:
+    """Keep the rows whose requests fit within budget, and print what is left for the next run.
+
+    The nightly jobs use this instead of check_budget: a busy night spreads
+    over the nights after it instead of refusing everything, every night.
+    """
+    keep = within_budget(tokens, model, budget)
+    kept = set(keep)
+    most = worst_case_cost([tokens[position] for position in keep], model, batch=False)
+    print(
+        f"The most the {len(keep)} sent could cost one at a time: ${most:.2f} "
+        f"(budget ${budget:.2f})."
+    )
+    left = [row for position, row in enumerate(rows) if position not in kept]
+    if left:
+        labels = ", ".join(
+            bill_label(row["bill_type"], row["bill_number"]) for row in left
+        )
+        print(f"{len(left)} left for the next run, to stay within the budget: {labels}")
+    return [rows[position] for position in keep], [
+        requests[position] for position in keep
+    ]
+
+
 def estimate(client, bills: list[dict], model: str) -> None:
     """Print the most the bills could cost each way. Counting is free; nothing is sent."""
     _, tokens = build_requests(client, bills, model)
@@ -565,14 +610,21 @@ def store(
     return inserted.rowcount == 1
 
 
-def sample(conn, client, bills: list[dict], model: str, budget: float) -> Decimal:
+def sample(
+    conn, client, bills: list[dict], model: str, budget: float, fit: bool = False
+) -> Decimal:
     """Write up the bills one request at a time, storing each answer as it arrives.
 
     Each answer is committed on its own, so one already paid for is kept even
-    if a later request fails. Returns what the requests cost.
+    if a later request fails. With fit, only the bills that fit within the
+    budget are sent and the rest wait for the next run; without it, nothing
+    is sent if they could cost more. Returns what the requests cost.
     """
     requests, tokens = build_requests(client, bills, model)
-    check_budget(tokens, model, batch=False, budget=budget)
+    if fit:
+        bills, requests = fit_to_budget(bills, requests, tokens, model, budget)
+    else:
+        check_budget(tokens, model, batch=False, budget=budget)
     spent = Decimal(0)
     with record_run(conn, JOB, f"{SOURCE} {model}") as run:
         for bill, request in zip(bills, requests, strict=True):
@@ -705,19 +757,25 @@ def rewrite_params(row: dict, model: str) -> dict:
     }
 
 
-def revise(conn, client, rows: list[dict], model: str, budget: float) -> Decimal:
+def revise(
+    conn, client, rows: list[dict], model: str, budget: float, fit: bool = False
+) -> Decimal:
     """Write each rewrite that is due, storing each as a draft that points back.
 
     The rows are revisions, other tries at a revision, and redrafts, from
     revisions_due and redrafts_due. Sent one at a time, like sample, so a run
-    started overnight is done in minutes. Returns what the requests cost.
+    started overnight is done in minutes. fit works as in sample. Returns
+    what the requests cost.
     """
     if model not in PRICES:
         raise ValueError(f"No price is known for {model}.")
 
     requests = [rewrite_params(row, model) for row in rows]
     tokens = measure(client, requests, model)
-    check_budget(tokens, model, batch=False, budget=budget)
+    if fit:
+        rows, requests = fit_to_budget(rows, requests, tokens, model, budget)
+    else:
+        check_budget(tokens, model, batch=False, budget=budget)
     spent = Decimal(0)
     with record_run(conn, JOB, f"{SOURCE} {model} rewrites") as run:
         for row, request in zip(rows, requests, strict=True):
@@ -950,6 +1008,14 @@ def main() -> None:
             help=f"refuse if the most it could cost is over this, in dollars "
             f"(default {DEFAULT_BUDGET})",
         )
+        if name == "sample":
+            command.add_argument(
+                "--fit-budget",
+                action="store_true",
+                help="send the requests that fit within --budget, in order, and leave the "
+                "rest for the next run, instead of refusing them all; for the "
+                "nightly jobs",
+            )
 
     collect_command = commands.add_parser("collect")
     collect_command.add_argument("batch_id")
@@ -964,6 +1030,13 @@ def main() -> None:
         default=DEFAULT_BUDGET,
         help=f"refuse if the most it could cost is over this, in dollars "
         f"(default {DEFAULT_BUDGET})",
+    )
+    revise_command.add_argument(
+        "--fit-budget",
+        action="store_true",
+        help="send the requests that fit within --budget, in order, and leave the "
+        "rest for the next run, instead of refusing them all; for the "
+        "nightly jobs",
     )
     review_command = commands.add_parser("review")
     review_command.add_argument(
@@ -998,7 +1071,7 @@ def main() -> None:
                 f"redraft {REDRAFT_PROMPT_VERSION}; model {args.model}."
             )
             try:
-                revise(conn, client, rows, args.model, args.budget)
+                revise(conn, client, rows, args.model, args.budget, args.fit_budget)
             except OverBudget as exc:
                 raise SystemExit(str(exc)) from None
             return
@@ -1009,7 +1082,7 @@ def main() -> None:
             if args.command == "estimate":
                 estimate(client, bills, args.model)
             elif args.command == "sample":
-                sample(conn, client, bills, args.model, args.budget)
+                sample(conn, client, bills, args.model, args.budget, args.fit_budget)
             else:
                 batch_id = submit(client, bills, args.model, args.budget)
                 print(f"Submitted batch {batch_id}. Collect it with:")

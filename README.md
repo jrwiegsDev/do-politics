@@ -143,7 +143,7 @@ The site runs on [Render](https://render.com), described in `render.yaml` (a Ren
 | `dopolitics` (web, Starter) | The app. Built with `uv sync --frozen --no-dev` (exactly the versions in `uv.lock`, without test tools), Python from `.python-version`. Each deploy runs `alembic upgrade head` first, then starts one uvicorn worker. Deploys automatically when a commit to `main` passes CI; the cron jobs rebuild on the same rule. Serves `dopolitics.org`. |
 | `dopolitics-db` (Postgres 18, 1 GB RAM, 5 GB disk) | Reachable only from Render's private network: its IP allow list is empty. |
 | `load-votes`, `load-bills` | Daily new roll calls, then the bills they name. |
-| `draft-new-summaries`, `revise-summaries` | Daily drafts for new bills and bills that moved to a newer stage (at most 20 and $1.50), and rewrites: approved summaries whose note asks for a change, and rejected ones. |
+| `draft-new-summaries`, `revise-summaries` | Daily drafts for new bills and bills that moved to a newer stage (at most 20), and rewrites: approved summaries whose note asks for a change, and rejected ones. Each within $5 of worst-case cost, sending what fits. |
 | `load-members-and-officials`, `load-photos` | Weekly and monthly. |
 
 Each service gets only the secrets it uses: the web app has only the database URL, and the Congress.gov and Claude API keys sit in two environment groups attached only to the jobs that call those APIs. Their values are entered in the Render Dashboard and never appear in the file. Cron schedules are in UTC, at hours that are overnight in every US time zone.
@@ -344,7 +344,7 @@ The API key is read from `ANTHROPIC_API_KEY` in `.env`. Only these commands send
 uv run --env-file .env python -m ingest.summaries estimate --limit 10
 uv run --env-file .env python -m ingest.summaries sample --bill 119/hr/498
 uv run --env-file .env python -m ingest.summaries submit --budget 6
-uv run --env-file .env python -m ingest.summaries sample --new-only --limit 20 --budget 1.50
+uv run --env-file .env python -m ingest.summaries sample --new-only --limit 20 --budget 5 --fit-budget
 uv run --env-file .env python -m ingest.summaries collect msgbatch_...
 uv run --env-file .env python -m ingest.summaries review
 uv run --env-file .env python -m ingest.summaries review --previous
@@ -354,7 +354,8 @@ uv run --env-file .env python -m ingest.summaries revise
 - `estimate` counts tokens, which is free, and prints the most the requests could cost.
 - `sample` sends requests one at a time and prints each answer, for tuning the prompt.
 - `submit` sends them through the Batch API at half price, and `collect` stores the answers once the batch has ended.
-- `sample`, `submit` and `revise` refuse to send anything when the most it could cost is over `--budget` dollars.
+- `sample`, `submit` and `revise` refuse to send anything when the most it could cost is over `--budget` dollars. The most is a worst case: every answer counted at its full token allowance, about 2.5 times what a typical summary really costs.
+- `--fit-budget` (on `sample` and `revise`, which the nightly jobs use) sends what fits instead: requests in order, each counted at its worst case, skipping one that would cross the budget and still taking smaller ones after it. What is left waits for the next run, and the log names it. An unattended job that refused everything would refuse the same list again every night; this way a busy night spreads over the nights after it. Manual runs keep all-or-nothing, to know before spending.
 - `--new-only` keeps only bills with nothing written from their newest CRS summary: bills with no generated summary at all, and bills whose approved text or draft came from an older stage (written from Introduced when the newest is Public Law, say). It is what the nightly job runs, so new bills get a draft the next morning and a bill that moved forward gets one from its new stage, without an older prompt's drafts being written again. The site keeps showing approved text until the newer draft is approved. A rejected bill is redrafted by `revise` (see Rejections below).
 
 **The prompt version.** It is a 12-character fingerprint of the full instructions, so any edit to the prompt or to the policy's writing rules gives a new version (an edit to another section of the policy does not), and every stored answer names the exact instructions it was written under. A new version makes every bill due again, except a bill whose summary is already approved. Naming a bill with `--bill` writes it again anyway.
