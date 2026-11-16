@@ -2,7 +2,13 @@
 
 import pytest
 
-from ingest.prompt import SYSTEM_PROMPT, fingerprint, system_prompt, writing_rules
+from ingest.prompt import (
+    REVISION_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    fingerprint,
+    system_prompt,
+    writing_rules,
+)
 
 POLICY = """\
 # Editorial policy
@@ -66,3 +72,16 @@ def test_the_real_prompt_has_the_rules_and_not_the_other_sections():
     assert "We say plainly who a bill helps" in SYSTEM_PROMPT
     assert "## Where the words come from" not in SYSTEM_PROMPT
     assert "## Corrections" not in SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("prompt", [SYSTEM_PROMPT, REVISION_SYSTEM_PROMPT])
+def test_the_reader_is_put_in_a_bill_for_students_whatever_their_age(prompt):
+    # Students, trainees and new graduates can be adults going back to
+    # school, so the example puts the reader in the scene, not only a child.
+    assert '"Imagine you or your child..."' in prompt
+    assert '"Imagine your child..."' not in prompt
+    assert (
+        "put a child in the scene alone only when the bill reaches only children"
+        in prompt
+    )
+    assert "keep to that through the rest of impact" in prompt
