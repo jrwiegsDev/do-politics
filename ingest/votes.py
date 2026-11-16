@@ -28,6 +28,7 @@ from ingest.categories import categorize, is_known
 from ingest.congress import session_year, sessions_to_check, today_in_washington
 from ingest.db import connect
 from ingest.fetch import open_url
+from ingest.logs import configure_logging
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
 
@@ -393,6 +394,7 @@ def recategorize(conn) -> tuple[int, list[dict]]:
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--chamber", choices=sorted(SOURCES))
     parser.add_argument("--congress", type=int, help="such as 119; needs --session")

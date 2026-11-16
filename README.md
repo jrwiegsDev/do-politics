@@ -632,7 +632,13 @@ After that, `git commit` runs the checks first and stops if one fails, so a mist
 | [unitedstates/images](https://github.com/unitedstates/images) | Members' photos (public domain) |
 | [House Clerk](https://clerk.house.gov/) / [Senate.gov](https://www.senate.gov/) | Roll-call votes |
 
-The loaders download every source through `ingest/fetch.py`, which tries a request up to four times when the failure is likely to pass: a dropped connection, a timeout, `429 Too Many Requests`, a `5xx` server error, or `403`, which Senate.gov sometimes returns for a file it serves a minute later. It waits about 1, 2, then 4 seconds between tries, plus up to a second of random jitter. Any other status, such as `404`, fails at once. The web app's call to the Census Geocoder is not retried: a visitor is waiting, so it fails fast and says so.
+The loaders download every source through `ingest/fetch.py`, which tries a request up to four times when the failure is likely to pass: a dropped connection, a timeout, `429 Too Many Requests`, a `5xx` server error, or `403`, which Senate.gov sometimes returns for a file it serves a minute later. It waits about 1, 2, then 4 seconds between tries, plus up to a second of random jitter. Any other status, such as `404`, fails at once. Each retry writes one warning line, so a run that recovered from failures can be told apart from one that was only slow:
+
+```
+WARNING ingest.fetch: https://clerk.house.gov/evs/2026/roll249.xml failed with HTTP 503; trying again in 1.4 s (attempt 1 of 4)
+```
+
+The line holds the address and never the request's headers, where the Congress.gov API key travels. `ingest/fetch.py` only logs; each loader's `main()` calls `configure_logging()` (`ingest/logs.py`) to send the lines to standard output, where Render collects them. The web app's call to the Census Geocoder is not retried: a visitor is waiting, so it fails fast and says so.
 
 ## License
 

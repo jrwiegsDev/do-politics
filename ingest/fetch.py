@@ -1,5 +1,12 @@
-"""Open web addresses for the loaders, trying again when a failure is likely to pass."""
+"""Open web addresses for the loaders, trying again when a failure is likely to pass.
 
+Each retry is logged as a warning on the ingest.fetch logger, with the
+address, what went wrong and how long the wait is, so a run that recovered
+from failures can be told apart from one that was only slow. The line never
+holds a request's headers, where the Congress.gov API key travels.
+"""
+
+import logging
 import random
 import time
 import urllib.error
@@ -15,6 +22,9 @@ RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
 ATTEMPTS = 4
 BASE_DELAY_SECONDS = 1.0
 
+# A helper logs; each loader's main decides where the lines go.
+logger = logging.getLogger(__name__)
+
 
 def backoff_delay(attempt: int) -> float:
     """Return how long to wait after a failed attempt: about 1, 2, then 4 seconds.
@@ -23,6 +33,11 @@ def backoff_delay(attempt: int) -> float:
     clients that failed together don't all try again at the same moment.
     """
     return BASE_DELAY_SECONDS * 2 ** (attempt - 1) + random.uniform(0, 1)
+
+
+def address(request: urllib.request.Request | str) -> str:
+    """Return the address a request asks for, without its headers."""
+    return request if isinstance(request, str) else request.full_url
 
 
 def open_url(request: urllib.request.Request | str, timeout: float) -> HTTPResponse:
@@ -39,8 +54,18 @@ def open_url(request: urllib.request.Request | str, timeout: float) -> HTTPRespo
             if error.code not in RETRY_STATUSES:
                 raise
             error.close()
-        except (urllib.error.URLError, TimeoutError):
+            failure = f"HTTP {error.code}"
+        except (urllib.error.URLError, TimeoutError) as error:
             # A dropped connection or a timeout: the network, not the address.
-            pass
-        time.sleep(backoff_delay(attempt))
+            failure = type(error).__name__
+        delay = backoff_delay(attempt)
+        logger.warning(
+            "%s failed with %s; trying again in %.1f s (attempt %d of %d)",
+            address(request),
+            failure,
+            delay,
+            attempt,
+            ATTEMPTS,
+        )
+        time.sleep(delay)
     return urllib.request.urlopen(request, timeout=timeout)
