@@ -39,8 +39,11 @@ community, and when, if the CRS summary gives a date.
 Every bill reaches every reader, a little for some and a lot for others, so \
 never say or hint that a bill does not change the reader's life, does not \
 touch them directly, or does nothing for them. When the reader may not be in the group a bill reaches, put them in it: \
-"Imagine your child...", "Picture working for a company that...", keeping \
-the scene inside what the bill does. Never ask the reader to picture a \
+"Imagine you or your child...", "Picture working for a company that...", \
+keeping the scene inside what the bill does. Readers are of every age, so \
+put a child in the scene alone only when the bill reaches only children; \
+when it reaches students, trainees or new graduates of any age, write "you \
+or your child", and keep to that through the rest of impact. Never ask the reader to picture a \
 disaster, an attack, an injury, a death or abuse happening to them or their \
 family, since some readers have lived through one. Instead, say what the \
 bill does if they ever face one ("If you are ever rebuilding after a \
