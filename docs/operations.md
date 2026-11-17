@@ -1,6 +1,6 @@
 # Operations
 
-The routines for running DoPolitics in production: reviewing generated summaries, the monthly backup and its restore check, and recovering the database. Each command says which folder to run it from and why.
+The routines for running DoPolitics in production: reviewing generated summaries, the monthly backup and its restore check, recovering the database, and fixing a summary job whose Anthropic key is rejected. Each command says which folder to run it from and why.
 
 The production database, `dopolitics-db`, has an empty IP allow list: nothing on the internet can connect to it, a laptop included. Anything that reads or writes it runs inside Render, which is why review happens over SSH into the web service.
 
@@ -143,3 +143,21 @@ When production data is wrong or lost (a bad loader run, a mistaken migration), 
 5. Then suspend or delete the old database.
 
 For anything older than 7 days, the newest monthly export is the source: restore it into a new, empty database. Render's restore commands drop and recreate what they restore, so never restore an export into a database that holds data you want to keep.
+
+## When a summary job fails with `401 invalid x-api-key`
+
+`draft-new-summaries` and `revise-summaries` show **Failed run** in the Render Dashboard, and the job's **Logs** end with:
+
+```
+anthropic.AuthenticationError: Error code: 401 - {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'invalid x-api-key'}, ...}
+```
+
+Anthropic did not recognize the key. The variable is set (a missing one fails earlier, with "Could not resolve authentication method"), and it is not billing (an empty balance is a 400 saying the credit balance is too low). The first call a job makes is a free token count, so nothing was spent and nothing was written; the same bills are picked up on the next good run.
+
+A job only uses the key on a night with work to send, so a bad key can sit unnoticed until then: on 2026-11-16 both jobs succeeded with nothing to do, and the first night with work failed. The cause that time was a cut-off paste of the right key.
+
+1. Render Dashboard: the **dopolitics** project, **production**, **Env Groups**, **anthropic-api**.
+2. Compare the end of `ANTHROPIC_API_KEY` with the key's hint on the [API keys](https://platform.claude.com/settings/keys) page of the Claude Console. If it is cut short or has a space or quote around it, paste the whole key again. If the key was deleted or disabled there, create a new one and paste that. Don't print the key in a terminal or a log to compare it.
+3. Save with the option that deploys, so both jobs pick up the new value.
+4. Open each job and click **Trigger Run**, `draft-new-summaries` first. Each stops at its $5 budget.
+5. Check each run's **Logs** for the bills drafted and a `Spent $` line.
