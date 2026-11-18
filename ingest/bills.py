@@ -287,9 +287,17 @@ def to_action_rows(actions: list[dict]) -> list[dict]:
 
     Congress.gov lists the newest first. The rows run oldest first, so
     position 0 is where the bill started. Rows have no bill_id yet.
+
+    An action with no words is left out. The Library of Congress sometimes
+    records one step twice under two codes, and one copy can come without
+    its text: S. 3347's introduction on 2025-12-04 is listed as 'Intro-S'
+    with no text beside '10000', 'Introduced in Senate'. A copy with no
+    words has nothing to show, so it is dropped before the rows are
+    numbered, and the positions stay one after another.
     """
+    worded = [action for action in actions if action.get("text")]
     rows = []
-    for position, action in enumerate(reversed(actions)):
+    for position, action in enumerate(reversed(worded)):
         acted_at = action.get("actionTime")
         rows.append(
             {
