@@ -8,7 +8,7 @@ DoPolitics takes a street address and returns every federal official who represe
 
 **Status:** live at **[dopolitics.org](https://dopolitics.org)** since November 15, 2026. Enter a street address and see your two senators and your representative, how often each one shows up to vote and what they're paid, their recent roll call votes, and the bill behind each vote with its official summary. It runs on Render: a FastAPI web service, a managed Postgres database with PostGIS, and six cron jobs that pull new votes, bills and members from government sources on a schedule.
 
-![DoPolitics showing the officials for the Illinois State Capitol and the representative's attendance, pay and recent votes](docs/screenshot.png)
+![DoPolitics showing Bill Search, the officials for the Illinois State Capitol, and the representative's attendance, pay and recent votes](docs/screenshot.png)
 
 **Stance:** This is a project to illustrate how politics affects all of us, and that conservative representation often creates or exacerbates problems rather than solving them. It may be labeled a progressive project, but the reality is that the GOP has controlled all three branches of government from January 20, 2025 until the 2026 midterms, and no one's life has gotten better. Its data comes from official government sources, and every summary links to the record it summarizes.
 
@@ -131,7 +131,7 @@ The database listens on `127.0.0.1:5433` by default, so it doesn't collide with 
 
 The image is built from `db/Dockerfile`: the official `postgres:18` image plus the PostGIS packages. The official `postgis/postgis` image has no arm64 build, so building our own keeps it native on Apple silicon.
 
-To refresh the screenshot at the top of this README, run `uv run python scripts/screenshot.py` while the dev server is up (or add `https://dopolitics.org` to shoot the live site). It drives a real Chromium through a lookup for the Illinois State Capitol and saves `docs/screenshot.png`.
+To refresh the screenshot at the top of this README, run `uv run python scripts/screenshot.py` while the dev server is up (or add `https://dopolitics.org` to shoot the live site). It drives a real Chromium through a lookup for the Illinois State Capitol and saves the whole page, title to footer, as `docs/screenshot.png`.
 
 To stop the database, run `docker compose down`. Data is kept in a named volume. To delete the data as well, run `docker compose down -v`.
 

@@ -1,7 +1,8 @@
 """Take the screenshot used in the README and on the portfolio card.
 
 Opens the site in a real Chromium, looks up the Illinois State Capitol,
-opens the representative's tile and saves the window as a PNG.
+opens the representative's tile and saves the whole page as a PNG, from
+the title to the footer's links.
 
 Run it while the dev server is up, or point it at the live site:
     uv run python scripts/screenshot.py
@@ -44,7 +45,9 @@ def main() -> None:
         expect(member.get_by_role("heading", name="Votes")).to_be_visible()
         page.wait_for_load_state("networkidle")
 
-        page.screenshot(path=OUTPUT)
+        # The whole page, not just the window: with Bill Search under the
+        # address form, the title and the footer no longer fit in one window.
+        page.screenshot(path=OUTPUT, full_page=True)
         browser.close()
 
     print(f"Saved {OUTPUT}")
