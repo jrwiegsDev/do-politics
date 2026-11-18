@@ -1,12 +1,30 @@
-"""Load the bills that stored votes name, with their summaries and actions, from Congress.gov.
+"""Load every bill of the 119th Congress onward, with its summaries and actions, from Congress.gov.
 
-Run ingest.votes first: the bills to load are the ones its votes name. Run
-ingest.members before that: every bill's sponsor must be a known member.
-The key for the API is read from CONGRESS_API_KEY.
+Run ingest.members first: every bill's sponsor must be a known member. Run
+ingest.votes before this too, so a bill a new vote names is loaded the same
+night. The key for the API is read from CONGRESS_API_KEY.
 
 Usage:
     uv run --env-file .env python -m ingest.bills
     uv run --env-file .env python -m ingest.bills --limit 3
+
+Each run lists every bill of each Congress from FIRST_STORED_CONGRESS to the
+current one, 250 to a request (80 requests for a Congress of 20,000 bills),
+and downloads only the bills that are new or have changed. The list gives the
+day a bill last changed, not the time, so a stored bill is downloaded again
+when it changed on or after the day before it was last downloaded: once or
+twice for each change, then not again until it changes. A bill a stored vote
+names is downloaded first if it is not stored yet, listed or not. The 120th
+Congress, seated on January 3, 2027, is picked up with no change here.
+
+--limit caps how many bills one run downloads, the most recently changed
+first. When this began storing every bill, about 19,500 bills of the 119th
+were not stored, so the nightly job runs with --limit 8000 and works through
+them over three nights; after that a night has a few hundred.
+
+A bill whose sponsor is not in the members table yet, such as a new member's
+first bill before the weekly members run, is skipped and reported. It is
+still not stored, so the next run tries it again.
 
 A vote names its bill in its issue text. The House writes 'H R 5103' and
 the Senate 'H.R. 5103'. Both become the type and number Congress.gov files
@@ -25,10 +43,11 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from itertools import islice
 from time import sleep
 
+from ingest.congress import congresses_since, today_in_washington
 from ingest.db import connect
 from ingest.fetch import open_url
 from ingest.logs import configure_logging
@@ -39,24 +58,51 @@ from ingest.user_agent import USER_AGENT
 JOB = "bills"
 SOURCE = "congress.gov"
 API_ROOT = "https://api.congress.gov/v3"
-PAUSE_SECONDS = 0.2
 
-# The API sends 20 actions at a time unless asked for more, and 250 is the
-# most it sends in one answer. Asking for 250 gets every stored bill's whole
-# list in one request; a list longer than that fails the run rather than
-# being cut short (see read_bill).
-ACTIONS_PER_REQUEST = 250
+# The first Congress whose every bill is stored. Bills of earlier Congresses
+# are loaded only if a stored vote names one.
+FIRST_STORED_CONGRESS = 119
+
+# A pause after every request keeps a run under 14,400 requests an hour,
+# inside Congress.gov's limit of 20,000, however quickly the answers come.
+PAUSE_SECONDS = 0.25
+
+# The API sends 20 items at a time unless asked for more, and 250 is the most
+# it sends in one answer: bills in a list, a bill's summaries or its actions.
+MOST_PER_REQUEST = 250
 
 BILL_TYPES = {"hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"}
 
 # Letters, dots and spaces, then one number: 'H J RES 42', 'S.Con.Res. 7'.
 ISSUE_PATTERN = re.compile(r"([A-Za-z. ]+?)\s*(\d+)")
 
-BILLS_NAMED_BY_VOTES_SQL = """
-SELECT DISTINCT congress, bill_type, bill_number
-FROM votes
-WHERE bill_type IS NOT NULL
-ORDER BY congress, bill_type, bill_number;
+# Bills a stored vote names that are not stored yet. A stored one is kept up
+# to date by the list of every bill, like any other.
+UNSTORED_VOTED_BILLS_SQL = """
+SELECT DISTINCT v.congress, v.bill_type, v.bill_number
+FROM votes v
+WHERE v.bill_type IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bills b
+      WHERE b.congress = v.congress
+        AND b.bill_type = v.bill_type
+        AND b.bill_number = v.bill_number
+  )
+ORDER BY v.congress, v.bill_type, v.bill_number;
+"""
+
+# The day each stored bill of a Congress was last downloaded, in UTC
+# (updated_at is set on every save). Congress.gov's list may count days on
+# Eastern time instead; the day of overlap in bills_to_download covers that.
+DOWNLOADED_ON_SQL = """
+SELECT bill_type, bill_number, (updated_at AT TIME ZONE 'UTC')::date
+FROM bills
+WHERE congress = %(congress)s;
+"""
+
+MEMBER_IDS_SQL = """
+SELECT bioguide_id FROM members;
 """
 
 UPSERT_BILL_SQL = """
@@ -140,7 +186,8 @@ def fetch_json(path: str, params: dict[str, int] | None = None) -> dict:
 
     params adds to the query string, as {'limit': 250} does. The key travels
     in a header, never in the address, so it cannot end up in a logged URL
-    or in the message of a failed request.
+    or in the message of a failed request. Each answer is followed by a
+    pause, so no run can ask faster than the API allows.
     """
     query = urllib.parse.urlencode({"format": "json"} | (params or {}))
     request = urllib.request.Request(
@@ -151,13 +198,63 @@ def fetch_json(path: str, params: dict[str, int] | None = None) -> dict:
         },
     )
     with open_url(request, timeout=30) as response:
-        return json.load(response)
+        answer = json.load(response)
+    sleep(PAUSE_SECONDS)
+    return answer
+
+
+def list_bills(congress: int) -> dict[tuple[str, int], date]:
+    """Return the day each bill of a Congress last changed, by (bill_type, bill_number).
+
+    The list comes MOST_PER_REQUEST bills at a time, and the first answer
+    says how many there are. The offsets are counted here rather than taken
+    from each answer's link to the next page, so every request is made by
+    fetch_json.
+    """
+    path = f"bill/{congress}"
+    first = fetch_json(path, {"limit": MOST_PER_REQUEST})
+    pages = [first]
+    for offset in range(
+        MOST_PER_REQUEST, first["pagination"]["count"], MOST_PER_REQUEST
+    ):
+        pages.append(fetch_json(path, {"limit": MOST_PER_REQUEST, "offset": offset}))
+
+    return {
+        (item["type"].lower(), int(item["number"])): date.fromisoformat(
+            item["updateDate"][:10]
+        )
+        for page in pages
+        for item in page["bills"]
+    }
+
+
+def bills_to_download(
+    listed: dict[tuple[str, int], date], downloaded_on: dict[tuple[str, int], date]
+) -> list[tuple[str, int]]:
+    """Return the listed bills that are new or changed, the most recently changed first.
+
+    The list gives only the day a bill changed, so a bill that changed later
+    on the day it was downloaded would look unchanged. A bill is taken when
+    it changed on or after the day before its last download; one that
+    changed earlier than that has nothing new.
+    """
+    due = [
+        bill
+        for bill, changed in listed.items()
+        if bill not in downloaded_on
+        or changed >= downloaded_on[bill] - timedelta(days=1)
+    ]
+    return sorted(due, key=lambda bill: listed[bill], reverse=True)
 
 
 def to_bill_row(bill: dict) -> dict:
-    """Turn one Congress.gov bill record into one row for the bills table."""
+    """Turn one Congress.gov bill record into one row for the bills table.
+
+    A bill with no sponsor gets None, which load reports and skips.
+    """
     latest = bill.get("latestAction") or {}
     latest_on = latest.get("actionDate")
+    sponsors = bill.get("sponsors") or []
 
     return {
         "congress": bill["congress"],
@@ -165,7 +262,7 @@ def to_bill_row(bill: dict) -> dict:
         "bill_number": int(bill["number"]),
         "title": bill["title"],
         "policy_area": (bill.get("policyArea") or {}).get("name"),
-        "sponsor_bioguide_id": bill["sponsors"][0]["bioguideId"],
+        "sponsor_bioguide_id": sponsors[0]["bioguideId"] if sponsors else None,
         "introduced_on": date.fromisoformat(bill["introducedDate"]),
         "latest_action_on": date.fromisoformat(latest_on) if latest_on else None,
         "latest_action": latest.get("text"),
@@ -212,14 +309,22 @@ def to_action_rows(actions: list[dict]) -> list[dict]:
 def read_actions(path: str, expected: int) -> list[dict]:
     """Download the actions of the bill at path and return them as rows.
 
-    expected is how many the bill's own record says it has. Fewer means the
-    list was cut short, so the run fails rather than store part of a bill's
-    history as if it were all of it.
+    expected is how many the bill's own record says it has. A list longer
+    than MOST_PER_REQUEST, such as a defense authorization's, is asked for
+    page by page. Fewer than expected means the list was cut short, so the
+    bill is refused rather than store part of its history as all of it.
     """
-    if not expected:
-        return []
+    actions = []
+    while len(actions) < expected:
+        params = {"limit": MOST_PER_REQUEST}
+        if actions:
+            params["offset"] = len(actions)
+        page = fetch_json(f"{path}/actions", params)["actions"]
+        actions += page
+        # A page shorter than asked for is the end of the list.
+        if len(page) < MOST_PER_REQUEST:
+            break
 
-    actions = fetch_json(f"{path}/actions", {"limit": ACTIONS_PER_REQUEST})["actions"]
     if len(actions) < expected:
         raise ValueError(
             f"{path} has {expected} actions but only {len(actions)} were sent"
@@ -247,9 +352,11 @@ def read_bill(
     summaries = []
     expected = (bill.get("summaries") or {}).get("count", 0)
     if expected:
-        # The API sends a list 20 at a time. No bill has come near that many
-        # summaries, so a short list means that has changed and pages are needed.
-        summaries = fetch_json(f"{path}/summaries")["summaries"]
+        # No bill has come near MOST_PER_REQUEST summaries, so a short list
+        # means that has changed and pages are needed.
+        summaries = fetch_json(f"{path}/summaries", {"limit": MOST_PER_REQUEST})[
+            "summaries"
+        ]
         if len(summaries) < expected:
             raise ValueError(
                 f"{path} has {expected} summaries but only {len(summaries)} were sent"
@@ -279,40 +386,81 @@ def save(conn, bill: dict, summaries: list[dict], actions: list[dict]) -> None:
         )
 
 
-def load(conn, limit: int | None = None) -> tuple[int, list[str]]:
-    """Load every bill a stored vote names, as one recorded run.
+def bills_due(conn, today: date) -> list[tuple[int, str, int]]:
+    """Return the bills to download: unstored ones a vote names, then new or changed ones.
 
-    Returns how many bills were loaded, and the bills Congress.gov does not
-    have. Each bill is committed with its summaries and actions as soon as
-    it is saved, so a run that fails partway keeps the bills already saved.
-    A bill that is not found is reported and skipped, so one bad issue text
-    on a vote cannot block every bill after it. Any other failure fails the
-    run.
+    Votes first, since a vote row links to its bill. Then the newest
+    Congress first, and within each the most recently changed first.
+    """
+    due = [tuple(row) for row in conn.execute(UNSTORED_VOTED_BILLS_SQL)]
+    taken = set(due)
+    for congress in reversed(congresses_since(FIRST_STORED_CONGRESS, today)):
+        downloaded_on = {
+            (bill_type, bill_number): day
+            for bill_type, bill_number, day in conn.execute(
+                DOWNLOADED_ON_SQL, {"congress": congress}
+            )
+        }
+        for bill_type, bill_number in bills_to_download(
+            list_bills(congress), downloaded_on
+        ):
+            if (congress, bill_type, bill_number) not in taken:
+                due.append((congress, bill_type, bill_number))
+    return due
+
+
+def load(
+    conn, today: date, limit: int | None = None
+) -> tuple[int, list[str], list[str]]:
+    """Load every new or changed bill of the stored Congresses, as one recorded run.
+
+    Returns how many bills were saved, the bills Congress.gov does not have,
+    and the bills skipped because their sponsor is not a known member. Each
+    bill is committed with its summaries and actions as soon as it is saved,
+    so a run that stops partway keeps the bills already saved, and the next
+    run picks up the rest. limit caps how many bills are downloaded.
+
+    A bill that is not found, or whose sponsor is not known yet, is reported
+    and skipped. A record that cannot be read is skipped too, so one bad
+    record cannot block the bills after it, but the run is marked failed at
+    the end, naming them. Any other failure fails the run at once.
     """
     with record_run(conn, JOB, SOURCE) as run:
-        named = conn.execute(BILLS_NAMED_BY_VOTES_SQL).fetchall()
-        missing = []
+        known = {bioguide_id for (bioguide_id,) in conn.execute(MEMBER_IDS_SQL)}
+        missing, unknown_sponsor, unreadable = [], [], []
 
-        for congress, bill_type, bill_number in islice(named, limit):
+        for congress, bill_type, bill_number in islice(bills_due(conn, today), limit):
+            name = f"{congress} {bill_type} {bill_number}"
             try:
                 bill, summaries, actions = read_bill(congress, bill_type, bill_number)
             except urllib.error.HTTPError as error:
                 if error.code != 404:
                     raise
-                missing.append(f"{congress} {bill_type} {bill_number}")
+                missing.append(name)
+                continue
+            except (KeyError, IndexError, ValueError) as error:
+                unreadable.append(f"{name}: {error!r}")
+                continue
+
+            if bill["sponsor_bioguide_id"] not in known:
+                unknown_sponsor.append(f"{name} ({bill['sponsor_bioguide_id']})")
                 continue
 
             save(conn, bill, summaries, actions)
             conn.commit()
             run.rows_loaded += 1
             print(
-                f"{bill_type} {bill_number}: "
-                f"{len(summaries)} summaries, {len(actions)} actions",
+                f"{name}: {len(summaries)} summaries, {len(actions)} actions",
                 flush=True,
             )
-            sleep(PAUSE_SECONDS)
 
-    return run.rows_loaded, missing
+        if unreadable:
+            raise ValueError(
+                f"Could not read {len(unreadable)} of the bills: "
+                + "; ".join(unreadable[:10])
+            )
+
+    return run.rows_loaded, missing, unknown_sponsor
 
 
 def main() -> None:
@@ -322,10 +470,12 @@ def main() -> None:
     args = parser.parse_args()
 
     with connect() as conn:
-        loaded, missing = load(conn, args.limit)
+        loaded, missing, unknown_sponsor = load(conn, today_in_washington(), args.limit)
     print(f"{loaded} bills loaded from {SOURCE}")
     for bill in missing:
         print(f"  not found on Congress.gov: {bill}")
+    for bill in unknown_sponsor:
+        print(f"  sponsor not yet in members, tried again next run: {bill}")
 
 
 if __name__ == "__main__":

@@ -33,6 +33,11 @@ def congress_for(day: date) -> tuple[int, int]:
     return congress, session
 
 
+def congresses_since(first: int, day: date) -> list[int]:
+    """Return every Congress from first through the one in progress on the given day."""
+    return list(range(first, congress_for(day)[0] + 1))
+
+
 def session_year(congress: int, session: int) -> int:
     """Return the year a session is filed under, such as 2026 for the 119th's second."""
     return FIRST_CONGRESS_YEAR + (congress - 1) * 2 + (session - 1)

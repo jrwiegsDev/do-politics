@@ -20,7 +20,7 @@ projects:
 
         databases:
           - name: dopolitics-db
-            plan: 0.5c-1g # $19/month: 1 GB RAM, so the 221 MB of data fits in memory
+            plan: 0.5c-1g # $19/month: 1 GB RAM; every bill since 2025 should be a few hundred MB
             region: ohio
             postgresMajorVersion: "18"
             databaseName: dopolitics
@@ -89,8 +89,12 @@ projects:
                   name: dopolitics-db
                   property: connectionString
 
-          # The bills those votes name, with their latest actions and CRS
-          # summaries, daily, after the votes.
+          # Every bill of the 119th Congress onward, with its actions and CRS
+          # summaries, daily, after the votes: only bills that are new or have
+          # changed, and first any bill a new vote names. --limit 8000 caps a
+          # run at a few hours, so the first backlog of about 19,500 bills is
+          # worked through over three nights; after that a night has a few
+          # hundred.
           - type: cron
             name: load-bills
             runtime: python
@@ -99,7 +103,7 @@ projects:
             autoDeployTrigger: checksPass
             schedule: "30 9 * * *"
             buildCommand: uv sync --frozen --no-dev
-            startCommand: uv run --no-sync python -m ingest.bills
+            startCommand: uv run --no-sync python -m ingest.bills --limit 8000
             envVars:
               - key: DATABASE_URL
                 fromDatabase:

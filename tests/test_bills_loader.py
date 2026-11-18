@@ -14,7 +14,9 @@ import pytest
 from helpers import add_members, add_vote, last_run
 
 from ingest.bills import (
+    bills_to_download,
     fetch_json,
+    list_bills,
     load,
     read_bill,
     save,
@@ -22,6 +24,9 @@ from ingest.bills import (
     to_bill_row,
     to_summary_row,
 )
+
+# The day the tests run as, in the 119th Congress.
+TODAY = date(2026, 11, 17)
 
 BILL = {
     "congress": 119,
@@ -93,27 +98,54 @@ ACTIONS = [
 WITH_ACTIONS = BILL | {"actions": {"count": 4}}
 
 
+def listed(number, update_date="2026-11-16", bill_type="HR", congress=119):
+    """Build one item of Congress.gov's list of a Congress's bills."""
+    return {
+        "congress": congress,
+        "type": bill_type,
+        "number": str(number),
+        "title": "Example Act",
+        "updateDate": update_date,
+    }
+
+
 class FakeApi:
     """Stand in for fetch_json, and remember each address that was asked for.
 
-    Any bill asked for is answered with the made-up bill under that number,
-    its summaries with the made-up summaries, and its actions with the
-    made-up actions. The query parameters of each request are kept in
-    params. Given a status, every request fails with that HTTP status
-    instead.
+    The list of a Congress's bills ('bill/119') is answered from listing,
+    a page at a time. Any bill asked for is answered with the made-up bill
+    under that number, its summaries with the made-up summaries, and its
+    actions with the made-up actions. The query parameters of each request
+    are kept in params. Given a status, every request for a bill fails with
+    that HTTP status instead.
     """
 
-    def __init__(self, bill=BILL, summaries=SUMMARIES, actions=ACTIONS, status=None):
+    def __init__(
+        self,
+        bill=BILL,
+        summaries=SUMMARIES,
+        actions=ACTIONS,
+        status=None,
+        listing=(),
+    ):
         self.bill = bill
         self.summaries = summaries
         self.actions = actions
         self.status = status
+        self.listing = list(listing)
         self.asked = []
         self.params = []
 
     def __call__(self, path: str, params: dict | None = None) -> dict:
         self.asked.append(path)
         self.params.append(params)
+        parts = path.split("/")
+        if len(parts) == 2:
+            congress = int(parts[1])
+            items = [item for item in self.listing if item["congress"] == congress]
+            start = (params or {}).get("offset", 0)
+            end = start + (params or {}).get("limit", 20)
+            return {"bills": items[start:end], "pagination": {"count": len(items)}}
         if self.status is not None:
             raise urllib.error.HTTPError(
                 f"https://example.test/{path}", self.status, "Refused", Message(), None
@@ -182,9 +214,8 @@ def test_bill_with_no_title_is_refused():
         to_bill_row(untitled)
 
 
-def test_bill_with_no_sponsor_is_refused():
-    with pytest.raises(IndexError):
-        to_bill_row(BILL | {"sponsors": []})
+def test_bill_with_no_sponsor_has_none():
+    assert to_bill_row(BILL | {"sponsors": []})["sponsor_bioguide_id"] is None
 
 
 def test_summary_becomes_a_row_holding_the_text_and_the_original():
@@ -278,13 +309,17 @@ def test_load_saves_each_bill_once_however_many_votes_name_it(
     add_vote(committing_conn, 2, 6, {"T000001": "Nay"})
     api = use(monkeypatch, FakeApi())
 
-    loaded, missing = load(committing_conn)
+    loaded, missing, unknown_sponsor = load(committing_conn, TODAY)
 
     recorded = last_run(committing_conn)
-    assert (loaded, missing) == (1, [])
+    assert (loaded, missing, unknown_sponsor) == (1, [], [])
     assert count(committing_conn, "bills") == 1
     assert count(committing_conn, "bill_summaries") == 2
-    assert api.asked == ["bill/119/hr/9999", "bill/119/hr/9999/summaries"]
+    assert api.asked == [
+        "bill/119",
+        "bill/119/hr/9999",
+        "bill/119/hr/9999/summaries",
+    ]
     assert (recorded["job"], recorded["status"]) == ("bills", "succeeded")
     assert recorded["rows_loaded"] == 1
 
@@ -296,7 +331,7 @@ def test_load_reports_and_skips_a_bill_that_is_not_found(
     add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
     use(monkeypatch, FakeApi(status=404))
 
-    loaded, missing = load(committing_conn)
+    loaded, missing, _ = load(committing_conn, TODAY)
 
     assert (loaded, missing) == (0, ["119 hr 9999"])
     assert last_run(committing_conn)["status"] == "succeeded"
@@ -310,7 +345,7 @@ def test_load_fails_the_run_on_any_other_refusal(
     use(monkeypatch, FakeApi(status=403))
 
     with pytest.raises(urllib.error.HTTPError):
-        load(committing_conn)
+        load(committing_conn, TODAY)
 
     recorded = last_run(committing_conn)
     assert recorded["status"] == "failed"
@@ -324,7 +359,7 @@ def test_load_stops_at_the_limit(committing_conn, monkeypatch, no_waiting):
     committing_conn.execute("UPDATE votes SET bill_number = 1 WHERE roll_number = 2")
     use(monkeypatch, FakeApi())
 
-    loaded, _ = load(committing_conn, limit=1)
+    loaded, _, _ = load(committing_conn, TODAY, limit=1)
 
     assert loaded == 1
     assert count(committing_conn, "bills") == 1
@@ -459,13 +494,15 @@ def test_load_saves_each_bill_with_its_actions(
     add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
     use(monkeypatch, FakeApi(bill=WITH_ACTIONS))
 
-    loaded, _ = load(committing_conn)
+    loaded, _, _ = load(committing_conn, TODAY)
 
     assert loaded == 1
     assert count(committing_conn, "bill_actions") == 4
 
 
-def test_fetch_json_adds_params_to_the_address_and_keeps_the_key_out(monkeypatch):
+def test_fetch_json_adds_params_to_the_address_and_keeps_the_key_out(
+    monkeypatch, no_waiting
+):
     asked = []
 
     class Answer:
@@ -490,3 +527,205 @@ def test_fetch_json_adds_params_to_the_address_and_keeps_the_key_out(monkeypatch
     )
     assert "not-a-real-key" not in request.full_url
     assert request.get_header("X-api-key") == "not-a-real-key"
+
+
+def test_fetch_json_pauses_after_every_answer(monkeypatch):
+    paused = []
+
+    class Answer:
+        def __enter__(self):
+            return io.BytesIO(b'{"bills": []}')
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("ingest.bills.open_url", lambda request, timeout: Answer())
+    monkeypatch.setattr("ingest.bills.sleep", paused.append)
+    monkeypatch.setenv("CONGRESS_API_KEY", "not-a-real-key")
+
+    fetch_json("bill/119")
+    fetch_json("bill/119", {"limit": 250, "offset": 250})
+
+    assert paused == [0.25, 0.25]
+
+
+def test_read_bill_asks_for_a_long_action_list_page_by_page(monkeypatch):
+    many = [ACTIONS[1]] * 300
+
+    class PagedActions(FakeApi):
+        def __call__(self, path, params=None):
+            answer = super().__call__(path, params)
+            if path.endswith("/actions"):
+                asked = params or {}
+                start = asked.get("offset", 0)
+                return {"actions": many[start : start + asked["limit"]]}
+            return answer
+
+    bill = BILL | {"actions": {"count": 300}, "summaries": {"count": 0}}
+    api = use(monkeypatch, PagedActions(bill=bill))
+
+    _, _, actions = read_bill(119, "hr", 9999)
+
+    assert len(actions) == 300
+    assert api.params[1:] == [{"limit": 250}, {"limit": 250, "offset": 250}]
+
+
+# Which bills a run downloads.
+
+
+def test_list_bills_asks_page_by_page_and_keys_each_bill_by_type_and_number(
+    monkeypatch,
+):
+    api = use(monkeypatch, FakeApi(listing=[listed(n) for n in range(1, 601)]))
+
+    bills = list_bills(119)
+
+    assert len(bills) == 600
+    assert bills[("hr", 1)] == date(2026, 11, 16)
+    assert api.params == [
+        {"limit": 250},
+        {"limit": 250, "offset": 250},
+        {"limit": 250, "offset": 500},
+    ]
+
+
+def test_list_bills_takes_the_day_of_a_date_that_has_a_time(monkeypatch):
+    use(monkeypatch, FakeApi(listing=[listed(1, "2026-11-16T19:50:47Z")]))
+
+    assert list_bills(119) == {("hr", 1): date(2026, 11, 16)}
+
+
+def test_new_and_changed_bills_are_downloaded_the_most_recently_changed_first():
+    changed_on = {
+        ("hr", 1): date(2026, 1, 5),  # not stored yet
+        ("hr", 2): date(2026, 11, 16),  # changed after its last download
+        ("hr", 3): date(2026, 11, 9),  # changed the day before its last download
+        ("hr", 4): date(2026, 11, 8),  # unchanged since its last download
+    }
+    downloaded_on = {
+        ("hr", 2): date(2026, 11, 1),
+        ("hr", 3): date(2026, 11, 10),
+        ("hr", 4): date(2026, 11, 10),
+    }
+
+    assert bills_to_download(changed_on, downloaded_on) == [
+        ("hr", 2),
+        ("hr", 3),
+        ("hr", 1),
+    ]
+
+
+def stored_and_downloaded_on(conn, day: str) -> None:
+    """Store the made-up bill as if it was last downloaded on the given day."""
+    add_members(conn)
+    save(conn, to_bill_row(BILL), [], [])
+    conn.execute("UPDATE bills SET updated_at = %s", [f"{day} 12:00Z"])
+    conn.commit()
+
+
+def test_load_downloads_listed_bills_that_no_vote_names(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    api = use(monkeypatch, FakeApi(listing=[listed(1), listed(2)]))
+
+    loaded, _, _ = load(committing_conn, TODAY)
+
+    assert loaded == 2
+    assert {"bill/119/hr/1", "bill/119/hr/2"} <= set(api.asked)
+
+
+def test_load_leaves_a_stored_bill_that_has_not_changed(
+    committing_conn, monkeypatch, no_waiting
+):
+    stored_and_downloaded_on(committing_conn, "2026-11-10")
+    add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
+    api = use(monkeypatch, FakeApi(listing=[listed(9999, "2026-11-08")]))
+
+    loaded, _, _ = load(committing_conn, TODAY)
+
+    assert loaded == 0
+    assert api.asked == ["bill/119"]
+
+
+def test_load_downloads_a_stored_bill_that_changed(
+    committing_conn, monkeypatch, no_waiting
+):
+    stored_and_downloaded_on(committing_conn, "2026-11-10")
+    use(monkeypatch, FakeApi(listing=[listed(9999, "2026-11-16")]))
+
+    loaded, _, _ = load(committing_conn, TODAY)
+
+    assert loaded == 1
+
+
+def test_load_skips_and_reports_a_bill_whose_sponsor_is_not_known_yet(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    newcomer = BILL | {"sponsors": [{"bioguideId": "N000001"}]}
+    use(monkeypatch, FakeApi(bill=newcomer, listing=[listed(1)]))
+
+    loaded, _, unknown_sponsor = load(committing_conn, TODAY)
+
+    assert (loaded, unknown_sponsor) == (0, ["119 hr 1 (N000001)"])
+    assert count(committing_conn, "bills") == 0
+    assert last_run(committing_conn)["status"] == "succeeded"
+
+
+def test_load_skips_a_bill_with_no_sponsor(committing_conn, monkeypatch, no_waiting):
+    add_members(committing_conn)
+    use(monkeypatch, FakeApi(bill=BILL | {"sponsors": []}, listing=[listed(1)]))
+
+    loaded, _, unknown_sponsor = load(committing_conn, TODAY)
+
+    assert (loaded, unknown_sponsor) == (0, ["119 hr 1 (None)"])
+
+
+def test_load_saves_the_readable_bills_then_fails_naming_an_unreadable_one(
+    committing_conn, monkeypatch, no_waiting
+):
+    class OneUntitled(FakeApi):
+        def __call__(self, path, params=None):
+            answer = super().__call__(path, params)
+            if path == "bill/119/hr/1":
+                del answer["bill"]["title"]
+            return answer
+
+    add_members(committing_conn)
+    listing = [listed(1, "2026-11-16"), listed(2, "2026-11-15")]
+    use(monkeypatch, OneUntitled(listing=listing))
+
+    with pytest.raises(ValueError, match="Could not read 1 of the bills: 119 hr 1"):
+        load(committing_conn, TODAY)
+
+    assert count(committing_conn, "bills") == 1
+    assert last_run(committing_conn)["status"] == "failed"
+
+
+def test_load_lists_the_new_congress_first_once_it_is_seated(
+    committing_conn, monkeypatch, no_waiting
+):
+    api = use(monkeypatch, FakeApi())
+
+    load(committing_conn, date(2027, 1, 3))
+
+    assert api.asked == ["bill/120", "bill/119"]
+
+
+def test_load_stops_at_the_limit_and_the_next_run_carries_on(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    listing = [
+        listed(1, "2026-01-07"),
+        listed(2, "2026-01-06"),
+        listed(3, "2026-01-05"),
+    ]
+    use(monkeypatch, FakeApi(listing=listing))
+
+    first, _, _ = load(committing_conn, TODAY, limit=2)
+    second, _, _ = load(committing_conn, TODAY, limit=2)
+
+    assert (first, second) == (2, 1)
+    assert count(committing_conn, "bills") == 3
