@@ -3,12 +3,13 @@
 import psycopg
 from psycopg.rows import dict_row
 
+from app.search import TITLE_QUERY
 from ingest.categories import LEGISLATION, NOMINATION, PROCEDURAL
 
 FINAL_CATEGORIES = [LEGISLATION, NOMINATION]
 ALL_CATEGORIES = [LEGISLATION, NOMINATION, PROCEDURAL]
 
-FIND_RECENT_VOTES_SQL = """
+FIND_RECENT_VOTES_SQL = f"""
 SELECT v.chamber, v.congress, v.session, v.roll_number, v.voted_at,
        v.question, v.issue, v.title, v.result, v.category, v.source_url,
        p.position,
@@ -26,7 +27,7 @@ WHERE p.bioguide_id = %(bioguide_id)s
   AND (%(bill_type)s::text IS NULL OR b.bill_type = %(bill_type)s)
   AND (%(bill_number)s::int IS NULL OR b.bill_number = %(bill_number)s)
   AND (%(words)s::text IS NULL
-       OR b.title_search @@ websearch_to_tsquery('english', %(words)s))
+       OR b.title_search @@ {TITLE_QUERY})
 ORDER BY v.voted_at DESC, v.roll_number DESC
 LIMIT %(limit)s OFFSET %(offset)s;
 """

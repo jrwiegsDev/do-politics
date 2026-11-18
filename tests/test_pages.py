@@ -22,6 +22,7 @@ from helpers import (
 from app.bills import bill_label
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
+from app.pages import ordinal
 from app.ratelimit import LOOKUP_LIMIT
 
 CAPITOL = (-89.6548, 39.7984)
@@ -1173,3 +1174,199 @@ def test_bill_tile_refuses_a_member_that_is_not_a_bioguide_id(client, conn):
     add_bill(conn)
 
     assert client.get(f"{BILL}?member=<script>").status_code == 422
+
+
+# Bill Search.
+
+
+def law_action():
+    return action(
+        0, date(2025, 5, 9), "Became Public Law No: 119-1.", action_type="BecameLaw"
+    )
+
+
+def search_rows(client, search, **params):
+    return client.get("/tiles/bills/search", params={"q": search} | params).text
+
+
+def test_front_page_has_bill_search_that_needs_no_address(client):
+    page = client.get("/").text
+
+    assert '<section class="tile" id="search-tile">' in page
+    assert '<label for="bill-search">Find a bill</label>' in page
+    assert 'hx-get="/tiles/bills/search"' in page
+    assert 'hx-trigger="input delay:300ms, submit"' in page
+    assert '<ul class="votes" id="bill-results"></ul>' in page
+    assert (
+        "Or just look up a bill to see how it affects you or someone you care about!"
+        in page
+    )
+
+
+def test_bill_search_finds_a_bill_by_words_by_its_name_or_by_its_number(client, conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+    add_bill(conn, 8888, title="Energy Prices Act")
+
+    for search in ("veteran", "H.R. 9999", "9999"):
+        rows = search_rows(client, search)
+
+        assert rows.count('class="vote"') == 1, search
+        assert "Veterans Benefits Act" in rows, search
+
+
+def test_bill_search_finds_bills_no_vote_names(client, conn):
+    add_members(conn)
+    add_bill(conn, 1234, title="Quiet Committee Act")
+
+    assert "Quiet Committee Act" in search_rows(client, "quiet")
+
+
+def test_bill_search_lists_laws_first_then_bills_with_a_roll_call(client, conn):
+    add_members(conn)
+    add_bill(conn, 1111, title="Clean Air Act")
+    add_bill(conn, 2222, title="Clean Air Act Again")
+    add_bill(conn, 3333, title="Clean Air Act Once More", actions=[law_action()])
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 2222")
+
+    rows = search_rows(client, "clean air")
+
+    law = rows.index("Clean Air Act Once More")
+    voted = rows.index("Clean Air Act Again")
+    neither = rows.index("Clean Air Act<")
+    assert law < voted < neither
+    assert rows.count("Became law") == 1
+
+
+def test_bill_search_row_names_the_bill_and_its_congress(client, conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+
+    rows = search_rows(client, "veteran")
+
+    assert "H.R. 9999 · 119th Congress" in rows
+    assert "Latest action May 9, 2025" in rows
+
+
+def test_choosing_a_bill_from_search_opens_the_bill_tile_with_no_member(client, conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+
+    rows = search_rows(client, "veteran")
+
+    assert 'hx-get="/tiles/bills/119/hr/9999"' in rows
+    assert 'hx-target="#bill-tile"' in rows
+    assert "member=" not in rows
+
+
+def test_a_bill_search_with_no_match_says_so(client, conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="Veterans Benefits Act")
+
+    assert "No bills match that search." in search_rows(client, "tariffs")
+
+
+@pytest.mark.parametrize("search", ["", "   "])
+def test_an_empty_bill_search_returns_nothing_at_all(client, search):
+    response = client.get("/tiles/bills/search", params={"q": search})
+
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+def test_more_bills_for_a_search_keep_the_search(client, conn):
+    add_members(conn)
+    for number in range(1, 22):
+        add_bill(conn, number, title=f"Clean Water Act {number}")
+
+    first = search_rows(client, "clean water")
+    second = search_rows(client, "clean water", offset=20)
+
+    assert first.count('class="vote"') == 20
+    assert "q=clean%20water&amp;topic=&amp;offset=20" in first
+    assert second.count('class="vote"') == 1
+    assert "Show more bills" not in second
+
+
+def test_a_bill_search_is_shown_as_text_and_never_as_html(client, conn):
+    add_members(conn)
+    add_bill(conn, 9999)
+
+    assert "<script>" not in search_rows(client, '"><script>alert(1)</script>')
+
+
+def test_bill_search_refuses_a_search_over_the_limit(client):
+    response = client.get("/tiles/bills/search", params={"q": "x" * 201})
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("number", "expected"),
+    [
+        (119, "119th"),
+        (120, "120th"),
+        (121, "121st"),
+        (122, "122nd"),
+        (123, "123rd"),
+        (111, "111th"),
+        (112, "112th"),
+        (113, "113th"),
+        (101, "101st"),
+    ],
+)
+def test_ordinal_writes_a_congress_the_way_people_say_it(number, expected):
+    assert ordinal(number) == expected
+
+
+def test_bill_search_finds_a_title_from_the_start_of_a_word(client, conn):
+    add_members(conn)
+    add_bill(conn, 2102, title="Major Richard Star Act")
+
+    for search in ("richar", "Richard", "maj star"):
+        assert "Major Richard Star Act" in search_rows(client, search), search
+
+
+def test_bill_search_has_a_dropdown_of_the_stored_bills_topics(client, conn):
+    add_members(conn)
+    add_bill(conn, 1111, policy_area="Health")
+    add_bill(conn, 2222, policy_area="Energy")
+    add_bill(conn, 3333, policy_area="Health")
+
+    page = client.get("/").text
+
+    assert '<label for="bill-topic">Topic</label>' in page
+    assert page.count('<option value="Health">Health</option>') == 1
+    assert page.index('value="Energy"') < page.index('value="Health"')
+
+
+def test_a_topic_alone_lists_that_topics_bills(client, conn):
+    add_members(conn)
+    add_bill(conn, 1111, policy_area="Health", title="Clinic Act")
+    add_bill(conn, 2222, policy_area="Energy", title="Grid Act")
+
+    rows = search_rows(client, "", topic="Health")
+
+    assert "Clinic Act" in rows
+    assert "Grid Act" not in rows
+
+
+def test_words_and_a_topic_must_both_match(client, conn):
+    add_members(conn)
+    add_bill(conn, 1111, policy_area="Health", title="Clean Water Act")
+    add_bill(conn, 2222, policy_area="Energy", title="Clean Energy Act")
+
+    rows = search_rows(client, "clean", topic="Energy")
+
+    assert rows.count('class="vote"') == 1
+    assert "Clean Energy Act" in rows
+
+
+def test_more_bills_for_a_topic_keep_the_topic(client, conn):
+    add_members(conn)
+    for number in range(1, 22):
+        add_bill(conn, number, policy_area="Health", title=f"Health Act {number}")
+
+    rows = search_rows(client, "", topic="Health")
+
+    assert "q=&amp;topic=Health&amp;offset=20" in rows

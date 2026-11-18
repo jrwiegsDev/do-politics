@@ -221,6 +221,16 @@ def test_words_find_bills_by_title_in_any_form_of_the_word(conn):
     assert rolls(find_recent_votes(conn, PAT, words="energy price")) == [2]
 
 
+def test_a_word_finds_titles_with_a_word_that_starts_with_it(conn):
+    add_members(conn)
+    add_bill(conn, 2102, title="Major Richard Star Act")
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, issue="H R 2102")
+
+    assert rolls(find_recent_votes(conn, PAT, words="richar")) == [1]
+    assert rolls(find_recent_votes(conn, PAT, words="maj sta")) == [1]
+    assert rolls(find_recent_votes(conn, PAT, words="richardson")) == []
+
+
 def test_every_word_must_be_in_the_title(conn):
     add_members(conn)
     add_bill(conn, 9999, title="Veterans Benefits Act")

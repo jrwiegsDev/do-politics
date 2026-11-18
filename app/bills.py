@@ -1,9 +1,11 @@
-"""Find a bill, its summaries, its plain-language summary, and its votes."""
+"""Find a bill, its summaries, its plain-language summary, and its votes, or search for bills."""
 
 from typing import Literal
 
 import psycopg
 from psycopg.rows import dict_row
+
+from app.search import TITLE_QUERY
 
 BillType = Literal["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
 
@@ -112,6 +114,57 @@ ORDER BY v.voted_at DESC, v.roll_number DESC;
 """
 
 
+# Bills matching a search, for the Bill Search tile. Laws come first, then
+# bills that got a roll call, then the best title matches, so what most
+# likely touched someone's life leads. The last keys fix the order, so a
+# page and the next never overlap. Whether a bill became law is looked up
+# per row through the bill_actions key, which starts with bill_id; the
+# bills with a roll call are gathered once, since votes has no index on
+# its bill columns.
+SEARCH_BILLS_SQL = f"""
+WITH voted AS (
+    SELECT DISTINCT congress, bill_type, bill_number
+    FROM votes
+    WHERE bill_type IS NOT NULL
+)
+SELECT b.congress, b.bill_type, b.bill_number, b.title, b.latest_action_on,
+       EXISTS (
+           SELECT 1
+           FROM bill_actions a
+           WHERE a.bill_id = b.id
+             AND a.action_type = 'BecameLaw'
+       ) AS became_law,
+       vb.congress IS NOT NULL AS voted
+FROM bills b
+LEFT JOIN voted vb
+  ON vb.congress = b.congress
+ AND vb.bill_type = b.bill_type
+ AND vb.bill_number = b.bill_number
+WHERE (%(policy_area)s::text IS NULL OR b.policy_area = %(policy_area)s)
+  AND (%(bill_type)s::text IS NULL OR b.bill_type = %(bill_type)s)
+  AND (%(bill_number)s::int IS NULL OR b.bill_number = %(bill_number)s)
+  AND (%(words)s::text IS NULL OR b.title_search @@ {TITLE_QUERY})
+ORDER BY became_law DESC,
+         voted DESC,
+         CASE WHEN %(words)s::text IS NULL THEN 0
+              ELSE ts_rank(b.title_search, {TITLE_QUERY})
+         END DESC,
+         b.latest_action_on DESC NULLS LAST,
+         b.congress DESC, b.bill_type, b.bill_number
+LIMIT %(limit)s OFFSET %(offset)s;
+"""
+
+
+# The topics (Congress.gov's policy areas) of the stored bills, for Bill
+# Search's dropdown.
+BILL_TOPICS_SQL = """
+SELECT DISTINCT policy_area
+FROM bills
+WHERE policy_area IS NOT NULL
+ORDER BY policy_area;
+"""
+
+
 def bill_label(bill_type: str, bill_number: int) -> str:
     """Return a bill's name as Congress writes it, such as 'H.R. 1' or 'S.J.Res. 12'."""
     return f"{BILL_LABELS[bill_type]} {bill_number}"
@@ -166,3 +219,37 @@ def find_member_votes(
     }
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(MEMBER_BILL_VOTES_SQL, params).fetchall()
+
+
+def search_bills(
+    conn: psycopg.Connection,
+    limit: int,
+    offset: int = 0,
+    bill_type: str | None = None,
+    bill_number: int | None = None,
+    words: str | None = None,
+    policy_area: str | None = None,
+) -> list[dict]:
+    """Return the bills a search asks for, laws first, then bills with a roll call.
+
+    bill_type, bill_number and words come from read_search: a bill as Congress
+    writes it, a number alone (any bill type), or words to find in titles,
+    each matching title words that start with it. policy_area narrows the
+    bills to one topic. Each row says whether the bill became law and
+    whether it got a roll call.
+    """
+    params = {
+        "limit": limit,
+        "offset": offset,
+        "policy_area": policy_area,
+        "bill_type": bill_type,
+        "bill_number": bill_number,
+        "words": words,
+    }
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(SEARCH_BILLS_SQL, params).fetchall()
+
+
+def find_bill_topics(conn: psycopg.Connection) -> list[str]:
+    """Return the topics of the stored bills, A to Z."""
+    return [policy_area for (policy_area,) in conn.execute(BILL_TOPICS_SQL)]
