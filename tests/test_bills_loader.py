@@ -4,7 +4,6 @@ The records below are made up, in the layout Congress.gov really sends, so
 no test calls the API and none needs a key.
 """
 
-import io
 import urllib.error
 from datetime import UTC, date, datetime, time
 from email.message import Message
@@ -24,6 +23,7 @@ from ingest.bills import (
     to_bill_row,
     to_summary_row,
 )
+from ingest.fetch import Download
 
 # The day the tests run as, in the 119th Congress.
 TODAY = date(2026, 11, 17)
@@ -505,18 +505,11 @@ def test_fetch_json_adds_params_to_the_address_and_keeps_the_key_out(
 ):
     asked = []
 
-    class Answer:
-        def __enter__(self):
-            return io.BytesIO(b'{"actions": []}')
-
-        def __exit__(self, *exc):
-            return False
-
-    def fake_open_url(request, timeout):
+    def fake_read_url(request, timeout):
         asked.append(request)
-        return Answer()
+        return Download(request.full_url, b'{"actions": []}')
 
-    monkeypatch.setattr("ingest.bills.open_url", fake_open_url)
+    monkeypatch.setattr("ingest.bills.read_url", fake_read_url)
     monkeypatch.setenv("CONGRESS_API_KEY", "not-a-real-key")
 
     fetch_json("bill/119/hr/9999/actions", {"limit": 250})
@@ -532,14 +525,10 @@ def test_fetch_json_adds_params_to_the_address_and_keeps_the_key_out(
 def test_fetch_json_pauses_after_every_answer(monkeypatch):
     paused = []
 
-    class Answer:
-        def __enter__(self):
-            return io.BytesIO(b'{"bills": []}')
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr("ingest.bills.open_url", lambda request, timeout: Answer())
+    monkeypatch.setattr(
+        "ingest.bills.read_url",
+        lambda request, timeout: Download(request.full_url, b'{"bills": []}'),
+    )
     monkeypatch.setattr("ingest.bills.sleep", paused.append)
     monkeypatch.setenv("CONGRESS_API_KEY", "not-a-real-key")
 
@@ -701,6 +690,33 @@ def test_load_saves_the_readable_bills_then_fails_naming_an_unreadable_one(
 
     assert count(committing_conn, "bills") == 1
     assert last_run(committing_conn)["status"] == "failed"
+
+
+def test_a_run_that_dies_partway_records_the_bills_it_kept(
+    committing_conn, monkeypatch, no_waiting
+):
+    # The 2026-11-18 run: 2,119 bills saved, then Congress.gov went quiet
+    # partway through an answer and every retry timed out too.
+    class StallsOnTheThird(FakeApi):
+        def __call__(self, path, params=None):
+            if path == "bill/119/hr/3/summaries":
+                raise TimeoutError("The read operation timed out")
+            return super().__call__(path, params)
+
+    add_members(committing_conn)
+    listing = [
+        listed(1, "2026-11-16"),
+        listed(2, "2026-11-15"),
+        listed(3, "2026-11-14"),
+    ]
+    use(monkeypatch, StallsOnTheThird(listing=listing))
+
+    with pytest.raises(TimeoutError):
+        load(committing_conn, TODAY)
+
+    recorded = last_run(committing_conn)
+    assert (recorded["status"], recorded["rows_loaded"]) == ("failed", 2)
+    assert count(committing_conn, "bills") == 2
 
 
 def test_load_lists_the_new_congress_first_once_it_is_seated(

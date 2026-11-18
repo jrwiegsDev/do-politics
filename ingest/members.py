@@ -9,7 +9,7 @@ import argparse
 import json
 
 from ingest.db import connect
-from ingest.fetch import open_url
+from ingest.fetch import read_url
 from ingest.logs import configure_logging
 from ingest.runs import record_run
 
@@ -43,8 +43,7 @@ def fetch(source: str) -> list[dict]:
     people move from the current file to the historical one between runs.
     """
     url = f"https://unitedstates.github.io/{PROJECT}/{source}.json"
-    with open_url(url, timeout=60) as response:
-        return json.load(response)
+    return json.loads(read_url(url, timeout=60).body)
 
 
 def to_row(member: dict, source: str) -> dict:

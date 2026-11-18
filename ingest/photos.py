@@ -22,7 +22,7 @@ from time import sleep
 
 from ingest.bills import fetch_json
 from ingest.db import connect
-from ingest.fetch import open_url
+from ingest.fetch import read_url
 from ingest.logs import configure_logging
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
@@ -71,9 +71,10 @@ WHERE member_photos.sha256 <> EXCLUDED.sha256
 
 
 def check_image(data: bytes) -> None:
-    """Raise ValueError unless data looks like a JPEG small enough to store."""
-    if len(data) > MAX_BYTES:
-        raise ValueError(f"image is over {MAX_BYTES} bytes")
+    """Raise ValueError unless data looks like a JPEG.
+
+    Its size is checked as it downloads: read_url refuses a body over MAX_BYTES.
+    """
     if not data.startswith(JPEG_SIGNATURE):
         raise ValueError("image is not a JPEG")
 
@@ -82,10 +83,7 @@ def download(url: str) -> bytes | None:
     """Download one image, or return None when the site has no file there."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with open_url(request, timeout=30) as response:
-            # One byte more than allowed, so an image that is too large is
-            # caught without reading the rest of it.
-            data = response.read(MAX_BYTES + 1)
+        data = read_url(request, timeout=30, max_bytes=MAX_BYTES).body
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
@@ -169,9 +167,9 @@ def load(conn, limit: int | None = None) -> tuple[int, int, list[str]]:
             # The upsert changes nothing when the stored photo is the same,
             # and then the database reports no rows written.
             written = conn.execute(UPSERT_SQL, row).rowcount
-            conn.commit()
+            run.rows_loaded += written
+            run.commit(conn)
             if written:
-                run.rows_loaded += 1
                 print(f"{bioguide_id}: saved from {row['source']}", flush=True)
             else:
                 unchanged += 1
