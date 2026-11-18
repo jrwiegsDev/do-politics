@@ -55,6 +55,36 @@
       </div>
     </form>
   </section>
+  {# Bill Search works with or without an address, and works like the
+     member's vote search: typing or choosing a topic asks the server for the
+     matching bills and puts them in the list below. hx-include sends both
+     fields together; the delay waits until typing pauses, and submit as a
+     trigger keeps Enter from reloading the page. Choosing a bill opens the
+     bill tile. The list holds nothing until something is typed or a topic
+     is chosen, so its :empty rule hides it. #}
+  <section class="tile" id="search-tile">
+    <p class="tile-lead">Or just look up a bill to see how it affects you or someone you care about!</p>
+    <form class="vote-filters"
+          hx-get="/tiles/bills/search"
+          hx-trigger="input delay:300ms, submit"
+          hx-include="this" hx-target="#bill-results" hx-swap="innerHTML">
+      <div class="vote-filter">
+        <label for="bill-search">Find a bill</label>
+        <input type="search" id="bill-search" name="q" maxlength="200"
+               placeholder="Bill number or words in the title" autocomplete="off">
+      </div>
+      <div class="vote-filter">
+        <label for="bill-topic">Topic</label>
+        <select id="bill-topic" name="topic">
+          <option value="">All topics</option>
+          {% for area in topics %}
+          <option value="{{ area }}">{{ area }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+    <ul class="votes" id="bill-results"></ul>
+  </section>
   <section class="tile" id="officials-tile"></section>
   <section class="tile" id="member-tile"></section>
   <section class="tile" id="bill-tile"></section>

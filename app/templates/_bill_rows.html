@@ -1,0 +1,24 @@
+{% for bill in bills %}
+<li class="vote">
+  {# Choosing a bill opens the bill tile under the other tiles, the same as
+     choosing a vote does, but with no member, so it has no "How they
+     voted" section. show:top scrolls the page to the top of the bill tile. #}
+  <button type="button" class="vote-title"
+          hx-get="/tiles/bills/{{ bill.congress }}/{{ bill.bill_type }}/{{ bill.bill_number }}"
+          hx-target="#bill-tile" hx-swap="innerHTML show:top">{{ bill.title }}</button>
+  <div class="vote-detail">
+    {{ bill.bill_type | bill_label(bill.bill_number) }} · {{ bill.congress | ordinal }} Congress
+    {%- if bill.became_law %} · <strong>Became law</strong>{% endif %}
+    {%- if bill.latest_action_on %} · Latest action {{ bill.latest_action_on | long_date }}{% endif %}
+  </div>
+</li>
+{% else %}
+<li class="vote-none">No bills match that search.</li>
+{% endfor %}
+{% if next_offset %}
+<li class="vote-more">
+  <button type="button"
+          hx-get="/tiles/bills/search?q={{ search | urlencode }}&amp;topic={{ (topic or '') | urlencode }}&amp;offset={{ next_offset }}"
+          hx-target="closest li" hx-swap="outerHTML">Show more bills</button>
+</li>
+{% endif %}

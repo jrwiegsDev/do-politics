@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, get_conn
 from app.security import DOCS_POLICY, HEADERS, SITE_POLICY, policy_for
 
 client = TestClient(app)
@@ -13,8 +13,13 @@ client = TestClient(app)
     "path",
     ["/", "/privacy", "/static/style.css", "/openapi.json", "/no-such-page"],
 )
-def test_every_response_carries_the_headers(path):
-    response = client.get(path)
+def test_every_response_carries_the_headers(path, conn):
+    # The front page reads the bill topics, so requests use the test database.
+    app.dependency_overrides[get_conn] = lambda: conn
+    try:
+        response = client.get(path)
+    finally:
+        app.dependency_overrides.clear()
 
     assert response.headers["Content-Security-Policy"] == SITE_POLICY
     for name, value in HEADERS.items():

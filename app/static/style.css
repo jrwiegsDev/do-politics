@@ -110,14 +110,16 @@ body {
   margin-top: 0.5rem;
 }
 
-/* The tiles. One column to start with. When the member tile holds anything,
-   the officials tile and the member tile share a row, and the bill tile runs
+/* The tiles. One column to start with: the address form, then Bill Search,
+   which works without an address. When the member tile holds anything, the
+   officials tile and the member tile share a row, and the bill tile runs
    the full width underneath. */
 .tiles {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     "address"
+    "search"
     "officials"
     "member"
     "bill";
@@ -128,6 +130,20 @@ body {
 
 #address-tile {
   grid-area: address;
+}
+
+/* With no address looked up, only Bill Search can have opened a bill. The
+   empty officials and member rows are left out, since an empty grid row
+   still adds a gap above the bill tile. */
+.tiles:has(#officials-tile:empty) {
+  grid-template-areas:
+    "address"
+    "search"
+    "bill";
+}
+
+#search-tile {
+  grid-area: search;
 }
 
 #officials-tile {
@@ -148,6 +164,7 @@ body {
     grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
     grid-template-areas:
       "address   address"
+      "search    search"
       "officials member"
       "bill      bill";
   }
@@ -268,6 +285,31 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 0.875rem;
+}
+
+/* The line at the top of Bill Search saying what it is for. */
+.tile-lead {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+/* Bill Search's results take no room until something is typed. On a wide
+   screen the list scrolls inside a short box, so the tiles below stay in
+   view; on a phone it scrolls like every other list (see .votes). */
+#bill-results:empty {
+  display: none;
+}
+
+#bill-results {
+  margin-top: 0.5rem;
+}
+
+@media (min-width: 50rem) {
+  #bill-results {
+    max-height: 18rem;
+    overflow-y: auto;
+  }
 }
 
 input[type="text"] {

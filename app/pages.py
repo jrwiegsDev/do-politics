@@ -11,7 +11,14 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.address import Address
-from app.bills import BillType, bill_label, find_bill, find_member_votes
+from app.bills import (
+    BillType,
+    bill_label,
+    find_bill,
+    find_bill_topics,
+    find_member_votes,
+    search_bills,
+)
 from app.deps import Conn, lookup_wait
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
@@ -67,13 +74,25 @@ def vote_date(moment: datetime) -> str:
     return long_date(moment.astimezone(EASTERN))
 
 
+def ordinal(number: int) -> str:
+    """Return a number as an ordinal, such as '119th', '121st' or '122nd'."""
+    suffixes = {1: "st", 2: "nd", 3: "rd"}
+    # 11, 12 and 13 take 'th', as in '111th', though they end in 1, 2 and 3.
+    if 11 <= number % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = suffixes.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
 # A template uses these as {{ vote.voted_at | vote_date }}, {{ bill.introduced_on
-# | long_date }}, {{ bill.bill_type | bill_label(bill.bill_number) }} and
-# {{ row.paid | dollars }}.
+# | long_date }}, {{ bill.bill_type | bill_label(bill.bill_number) }},
+# {{ row.paid | dollars }} and {{ bill.congress | ordinal }}.
 templates.env.filters["long_date"] = long_date
 templates.env.filters["vote_date"] = vote_date
 templates.env.filters["bill_label"] = bill_label
 templates.env.filters["dollars"] = dollars
+templates.env.filters["ordinal"] = ordinal
 
 
 def vote_page(
@@ -102,6 +121,23 @@ def vote_page(
     }
 
 
+def bill_search_page(conn: Conn, search: str, topic: str | None, offset: int) -> dict:
+    """Return one page of the bills a search finds and where the next page starts.
+
+    Like vote_page, one more bill than a page holds is asked for, to know
+    whether there is a next page.
+    """
+    bills = search_bills(
+        conn, PAGE_SIZE + 1, offset=offset, policy_area=topic, **read_search(search)
+    )
+    return {
+        "search": search,
+        "topic": topic,
+        "bills": bills[:PAGE_SIZE],
+        "next_offset": offset + PAGE_SIZE if len(bills) > PAGE_SIZE else None,
+    }
+
+
 def message(
     request: Request, text: str, status_code: int, clear_tiles: bool = False
 ) -> HTMLResponse:
@@ -119,9 +155,13 @@ def message(
 # HEAD as well as GET: Render probes the front page with HEAD when a deploy starts.
 @router.head("/")
 @router.get("/")
-def index(request: Request) -> HTMLResponse:
-    """Return the whole page: the greeting and the address tile."""
-    return templates.TemplateResponse(request, "index.html")
+def index(request: Request, conn: Conn) -> HTMLResponse:
+    """Return the whole page: the greeting, the address tile and Bill Search.
+
+    Bill Search's topic dropdown lists the topics of the stored bills.
+    """
+    context = {"topics": find_bill_topics(conn)}
+    return templates.TemplateResponse(request, "index.html", context)
 
 
 @router.get("/favicon.ico")
@@ -279,6 +319,26 @@ def vote_rows(
     # The dropdown's "All topics" choice sends an empty topic.
     context = vote_page(conn, bioguide_id, topic or None, offset, q)
     return templates.TemplateResponse(request, "_vote_rows.html", context)
+
+
+@router.get("/tiles/bills/search")
+def bill_rows(
+    request: Request,
+    conn: Conn,
+    q: Annotated[str, Query(max_length=MAX_LENGTH)] = "",
+    topic: Annotated[str, Query(max_length=100)] = "",
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> HTMLResponse:
+    """Return a page of the bills a search and topic find, as list rows.
+
+    A topic alone lists that topic's bills. With neither, nothing at all is
+    returned, so clearing the box empties the list, and the list's :empty
+    rule hides it. The dropdown's "All topics" choice sends an empty topic.
+    """
+    if not q.strip() and not topic:
+        return HTMLResponse("")
+    context = bill_search_page(conn, q, topic or None, offset)
+    return templates.TemplateResponse(request, "_bill_rows.html", context)
 
 
 @router.get("/tiles/bills/{congress}/{bill_type}/{bill_number}")
