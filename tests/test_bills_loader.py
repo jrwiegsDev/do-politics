@@ -388,11 +388,49 @@ def test_action_with_no_time_or_code_leaves_them_empty():
     assert row["action_code"] is None
 
 
-def test_action_with_no_words_is_refused():
-    wordless = {key: value for key, value in ACTIONS[0].items() if key != "text"}
+# The Library of Congress's wordless copy of a step, as Congress.gov sent it
+# for S. 3347 beside its worded 'Introduced in Senate'.
+WORDLESS = {
+    "actionCode": "Intro-S",
+    "actionDate": "2025-01-15",
+    "type": "IntroReferral",
+    "sourceSystem": {"code": 9, "name": "Library of Congress"},
+}
 
-    with pytest.raises(KeyError):
-        to_action_rows([wordless])
+
+def test_action_with_no_words_is_left_out_and_the_rest_stay_numbered():
+    rows = to_action_rows([*ACTIONS[:2], WORDLESS, *ACTIONS[2:]])
+
+    assert [row["position"] for row in rows] == [0, 1, 2, 3]
+    assert "Intro-S" not in [row["action_code"] for row in rows]
+    assert rows == to_action_rows(ACTIONS)
+
+
+def test_read_bill_counts_a_wordless_action_as_sent(monkeypatch):
+    # The bill says 5 actions and Congress.gov sends 5, one of them wordless.
+    # The list is whole, so it is not refused as cut short; 4 are kept.
+    bill = BILL | {"actions": {"count": 5}}
+    use(monkeypatch, FakeApi(bill=bill, actions=[*ACTIONS, WORDLESS]))
+
+    _, _, actions = read_bill(119, "hr", 9999)
+
+    assert len(actions) == 4
+
+
+def test_a_bill_with_a_wordless_action_is_saved_and_the_run_succeeds(
+    committing_conn, monkeypatch, no_waiting
+):
+    # The run of 2026-11-18 failed on eight Senate bills like this one.
+    add_members(committing_conn)
+    add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
+    bill = BILL | {"actions": {"count": 5}}
+    use(monkeypatch, FakeApi(bill=bill, actions=[*ACTIONS, WORDLESS]))
+
+    loaded, _, _ = load(committing_conn, TODAY)
+
+    assert loaded == 1
+    assert count(committing_conn, "bill_actions") == 4
+    assert last_run(committing_conn)["status"] == "succeeded"
 
 
 def test_read_bill_asks_for_up_to_250_actions_in_one_request(monkeypatch):
