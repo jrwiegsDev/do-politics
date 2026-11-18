@@ -27,7 +27,7 @@ from ingest.bills import bill_for
 from ingest.categories import categorize, is_known
 from ingest.congress import session_year, sessions_to_check, today_in_washington
 from ingest.db import connect
-from ingest.fetch import open_url
+from ingest.fetch import read_url
 from ingest.logs import configure_logging
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
@@ -136,10 +136,10 @@ def fetch_xml(url: str) -> ET.Element:
     anywhere but the address asked for is what marks a miss.
     """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with open_url(request, timeout=30) as response:
-        if response.url != url:
-            raise NotPublished(url)
-        return ET.fromstring(response.read())
+    fetched = read_url(request, timeout=30)
+    if fetched.url != url:
+        raise NotPublished(url)
+    return ET.fromstring(fetched.body)
 
 
 def text_or_none(value: str | None) -> str | None:
@@ -347,8 +347,8 @@ def load(
         for vote, positions in islice(found, limit):
             check_belongs(vote, chamber, congress, session)
             save(conn, vote, positions)
-            conn.commit()
             run.rows_loaded += 1
+            run.commit(conn)
             print(f"{chamber} {vote['roll_number']}: {len(positions)} positions")
             if not is_known(vote):
                 print(

@@ -23,6 +23,7 @@ FAIL_RUN_SQL = """
 UPDATE ingestion_runs
 SET status = 'failed',
     finished_at = now(),
+    rows_loaded = %(rows_loaded)s,
     error = %(error)s
 WHERE id = %(run_id)s;
 """
@@ -30,10 +31,21 @@ WHERE id = %(run_id)s;
 
 @dataclass
 class Run:
-    """What a job gets back from record_run, to report how many rows it wrote."""
+    """What a job gets back from record_run, to report how many rows it wrote.
+
+    A job that commits as it goes calls run.commit(conn) rather than
+    conn.commit(), so rows_committed always says how many rows a failure
+    can no longer undo. A failed run is recorded with that count.
+    """
 
     id: int
     rows_loaded: int = 0
+    rows_committed: int = 0
+
+    def commit(self, conn: psycopg.Connection) -> None:
+        """Commit the job's writes so far, and count the rows loaded as kept."""
+        conn.commit()
+        self.rows_committed = self.rows_loaded
 
 
 @contextmanager
@@ -42,7 +54,8 @@ def record_run(conn: psycopg.Connection, job: str, source: str):
 
     The 'running' row is committed on its own, so a run that crashes is still
     on record. The job's own writes and the 'succeeded' mark commit together.
-    On any error the job's writes are rolled back and the run is marked 'failed'.
+    On any error the job's uncommitted writes are rolled back and the run is
+    marked 'failed', with the rows it had already committed.
     """
     row = conn.execute(START_RUN_SQL, {"job": job, "source": source}).fetchone()
     # INSERT ... RETURNING always hands back the new row. The type checker
@@ -60,7 +73,12 @@ def record_run(conn: psycopg.Connection, job: str, source: str):
     except BaseException as exc:
         conn.rollback()
         conn.execute(
-            FAIL_RUN_SQL, {"run_id": run.id, "error": f"{type(exc).__name__}: {exc}"}
+            FAIL_RUN_SQL,
+            {
+                "run_id": run.id,
+                "rows_loaded": run.rows_committed,
+                "error": f"{type(exc).__name__}: {exc}",
+            },
         )
         conn.commit()
         raise

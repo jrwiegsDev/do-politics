@@ -66,6 +66,8 @@ def stored(conn, bioguide_id) -> dict | None:
 class FakeResponse(io.BytesIO):
     """Stands in for what urlopen returns: a file to read, used in a with block."""
 
+    url = "https://example.test/a.jpg"
+
 
 def test_a_jpeg_is_accepted():
     check_image(JPEG)
@@ -76,9 +78,23 @@ def test_something_that_is_not_a_jpeg_is_refused():
         check_image(b"<html>Not found</html>")
 
 
-def test_an_image_over_the_limit_is_refused():
-    with pytest.raises(ValueError, match="over"):
-        check_image(JPEG + b"x" * MAX_BYTES)
+def test_download_refuses_an_image_over_the_limit(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout: FakeResponse(JPEG + b"x" * MAX_BYTES),
+    )
+
+    with pytest.raises(ValueError, match=f"over {MAX_BYTES} bytes"):
+        download("https://example.test/a.jpg")
+
+
+def test_download_accepts_an_image_exactly_at_the_limit(monkeypatch):
+    image = JPEG + b"x" * (MAX_BYTES - len(JPEG))
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda request, timeout: FakeResponse(image)
+    )
+
+    assert download("https://example.test/a.jpg") == image
 
 
 def test_download_returns_the_image(monkeypatch):

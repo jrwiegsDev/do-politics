@@ -161,3 +161,39 @@ A job only uses the key on a night with work to send, so a bad key can sit unnot
 3. Save with the option that deploys, so both jobs pick up the new value.
 4. Open each job and click **Trigger Run**, `draft-new-summaries` first. Each stops at its $5 budget.
 5. Check each run's **Logs** for the bills drafted and a `Spent $` line.
+
+## When a loader fails with a timeout or a dropped connection
+
+A loader job shows **Failed run**, and its **Logs** end with a traceback through `ingest/fetch.py` and one of:
+
+```
+TimeoutError: The read operation timed out
+urllib.error.URLError: <urlopen error ...>
+ConnectionResetError: [Errno 104] Connection reset by peer
+http.client.IncompleteRead: IncompleteRead(... bytes read, ... more expected)
+```
+
+The source stopped answering. `read_url()` tries every download four times over about 8 seconds, so this means it failed all four: the source was down or overloaded for a while, not for one request. Above the traceback are three `WARNING ingest.fetch: ... trying again` lines for the same address. If they are missing, the failure escaped the retry, which is a bug in `ingest/fetch.py` to fix before anything else: on 2026-11-18 a Congress.gov answer stalled after its headers, the body was read outside the retry, and the bills run stopped after 2,119 bills with no warning lines.
+
+Nothing saved is lost. The bills, votes and photo loaders commit each record as soon as it is saved, and the next run carries on from where this one stopped. The members and officials loaders write all or nothing, so they changed nothing.
+
+1. Check the source is back: [Congress.gov API status](https://api.congress.gov/), clerk.house.gov or senate.gov in a browser.
+2. Query how far the run got. In the **dopolitics** web service's **Shell**:
+
+   ```
+   uv run --no-sync python - <<'EOF'
+   import os
+   import psycopg
+
+   with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+       conn.read_only = True
+       for row in conn.execute(
+           "SELECT job, status, rows_loaded, started_at, finished_at, error"
+           " FROM ingestion_runs ORDER BY started_at DESC LIMIT 5"
+       ):
+           print(row)
+   EOF
+   ```
+
+   `rows_loaded` on a failed run is the rows it kept.
+3. Leave it for the next scheduled run, or open the job and click **Trigger Run** to catch up now. A rerun does not repeat the work already saved.

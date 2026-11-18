@@ -49,7 +49,7 @@ from time import sleep
 
 from ingest.congress import congresses_since, today_in_washington
 from ingest.db import connect
-from ingest.fetch import open_url
+from ingest.fetch import read_url
 from ingest.logs import configure_logging
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
@@ -197,8 +197,7 @@ def fetch_json(path: str, params: dict[str, int] | None = None) -> dict:
             "User-Agent": USER_AGENT,
         },
     )
-    with open_url(request, timeout=30) as response:
-        answer = json.load(response)
+    answer = json.loads(read_url(request, timeout=30).body)
     sleep(PAUSE_SECONDS)
     return answer
 
@@ -447,8 +446,8 @@ def load(
                 continue
 
             save(conn, bill, summaries, actions)
-            conn.commit()
             run.rows_loaded += 1
+            run.commit(conn)
             print(
                 f"{name}: {len(summaries)} summaries, {len(actions)} actions",
                 flush=True,

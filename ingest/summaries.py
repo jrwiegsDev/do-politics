@@ -656,8 +656,8 @@ def sample(
             spent += cost
             bill_id, version_code = bill["bill_id"], bill["version_code"]
             stored = store(conn, bill_id, version_code, PROMPT_VERSION, message, cost)
-            conn.commit()
             run.rows_loaded += stored
+            run.commit(conn)
             label = bill_label(bill["bill_type"], bill["bill_number"])
             print(f"  {label}: ${cost:.4f}", flush=True)
             answer = read_answer(message)
@@ -815,7 +815,7 @@ def revise(
                 cost,
                 revised_from=row["revised_from"],
             )
-            conn.commit()
+            run.commit(conn)
             label = bill_label(row["bill_type"], row["bill_number"])
             print(f"  {label}, {row['kind']}: ${cost:.4f}", flush=True)
             answer = read_answer(message)
