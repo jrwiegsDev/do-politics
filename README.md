@@ -142,7 +142,7 @@ The site runs on [Render](https://render.com), described in `render.yaml` (a Ren
 |---|---|
 | `dopolitics` (web, Starter) | The app. Built with `uv sync --frozen --no-dev` (exactly the versions in `uv.lock`, without test tools), Python from `.python-version`. Each deploy runs `alembic upgrade head` first, then starts one uvicorn worker. Deploys automatically when a commit to `main` passes CI; the cron jobs rebuild on the same rule. Serves `dopolitics.org`. |
 | `dopolitics-db` (Postgres 18, 1 GB RAM, 5 GB disk) | Reachable only from Render's private network: its IP allow list is empty. |
-| `load-votes`, `load-bills` | Daily new roll calls, then the bills they name. |
+| `load-votes`, `load-bills` | Daily new roll calls, then every bill of the 119th Congress onward that is new or changed (at most 8,000 a run), starting with any bill a new vote names. |
 | `draft-new-summaries`, `revise-summaries` | Daily drafts for new bills and bills that moved to a newer stage (at most 20; only bills with a roll call or that became law), and rewrites: approved summaries whose note asks for a change, and rejected ones. Each within $5 of worst-case cost, sending what fits. |
 | `load-members-and-officials`, `load-photos` | Weekly and monthly. |
 
@@ -318,7 +318,11 @@ Two tables (`migrations/versions/0007_bills.py`) hold the bills. `bills` has one
 uv run --env-file .env python -m ingest.bills
 ```
 
-The loader's list of work is the stored votes: it asks for every bill that some vote names, and nothing else. A vote is tied to its bill by Congress, type and number, the same three values on both tables, so the votes loader never has to wait for this one. A vote on a bill that has not been loaded yet simply has no bill attached.
+The loader stores every bill of the 119th Congress onward, so a bill can be found whether or not it ever reached a vote: about 20,000 for the 119th, where only a few hundred get a roll call. Each run lists every bill of each Congress from the 119th to the current one, 250 to a request, and downloads only the ones that are new or have changed. The list gives only the day a bill last changed, so a stored bill is downloaded again when it changed on or after the day before its last download: once or twice per change, then not again until it changes. A bill some vote names is downloaded first if it is not stored yet. The 120th Congress is picked up on January 3, 2027 with no code change (`congresses_since` in `ingest/congress.py`).
+
+`--limit` caps how many bills a run downloads, the most recently changed first, and the nightly job uses `--limit 8000`: the roughly 19,500 bills not yet stored when this began are worked through over three nights, and after that a night has a few hundred. A pause after every request keeps a run under 14,400 requests an hour, inside the API's limit of 20,000. A bill whose sponsor is not in `members` yet (a new member's first bill before the weekly members run) is skipped and reported, and tried again the next night; a record that cannot be read is skipped so it cannot block the bills after it, and the run is then marked failed, naming it.
+
+A vote is tied to its bill by Congress, type and number, the same three values on both tables, so the votes loader never has to wait for this one. A vote on a bill that has not been loaded yet simply has no bill attached.
 
 The API key is read from `CONGRESS_API_KEY` and sent in a request header, never in the address, so it cannot end up in a logged URL or in a recorded error.
 
@@ -326,7 +330,7 @@ Summaries are published as HTML. `html_to_text` in `ingest/plain_text.py` conver
 
 Some bills have no official summary, and some never get one. That is stored as a bill with no summary rows, and the API returns an empty list for it.
 
-**Actions.** `bill_actions` (`migrations/versions/0012_bill_actions.py`) holds every step a bill has taken: introduced, referred to committee, passed by a recorded vote or by voice vote or unanimous consent, sent to the President, signed. This is the only place a bill passed without a roll call shows that it passed, since no vote record names it. The loader asks for a bill's actions alongside its summaries, up to 250 in one request (the API sends 20 at a time unless asked for more; the longest list among the 519 bills stored at launch was 114, H.R. 5371), and fails the run if fewer arrive than the bill's record says it has, rather than store part of a bill's history as all of it. A bill whose record lists no actions costs no request for them.
+**Actions.** `bill_actions` (`migrations/versions/0012_bill_actions.py`) holds every step a bill has taken: introduced, referred to committee, passed by a recorded vote or by voice vote or unanimous consent, sent to the President, signed. This is the only place a bill passed without a roll call shows that it passed, since no vote record names it. The loader asks for a bill's actions alongside its summaries, 250 to a request (the API sends 20 at a time unless asked for more), page by page for the rare bill with more, and refuses the bill if fewer arrive than its record says it has, rather than store part of a bill's history as all of it. A bill whose record lists no actions costs no request for them.
 
 An action has no identifier of its own, and two can be identical: a bill sent to two committees gets one referral row for each. With nothing to match on, an upsert cannot tell a changed action from a new one, so each run replaces the set: it deletes the bill's stored actions and inserts the list just read, in the same transaction that saves the bill. A reader sees the old list or the new one, never a mix or an empty list. Rows are keyed on the bill and their position, oldest step first.
 

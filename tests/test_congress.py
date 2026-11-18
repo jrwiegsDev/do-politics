@@ -6,6 +6,7 @@ import pytest
 
 from ingest.congress import (
     congress_for,
+    congresses_since,
     previous_session,
     session_year,
     sessions_to_check,
@@ -28,6 +29,19 @@ from ingest.congress import (
 )
 def test_a_date_gives_its_congress_and_session(day, expected):
     assert congress_for(day) == expected
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 11, 17), [119]),
+        # January 2 still belongs to the 119th; the 120th is seated on the 3rd.
+        (date(2027, 1, 2), [119]),
+        (date(2027, 1, 3), [119, 120]),
+    ],
+)
+def test_congresses_since_runs_through_the_one_in_progress(day, expected):
+    assert congresses_since(119, day) == expected
 
 
 @pytest.mark.parametrize(
