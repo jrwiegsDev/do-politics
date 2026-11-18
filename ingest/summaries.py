@@ -27,6 +27,10 @@ approved text or draft came from an older stage, such as Introduced when the
 newest is Public Law. An older prompt's drafts are not written again, and a
 rejected bill is redrafted by revise.
 
+Only bills that a stored roll call names, or that became law, are written
+up. Any other bill is written only when named with --bill, so the nightly
+job never drafts the thousands of bills that never reached a vote.
+
 A bill is written up from its newest CRS summary, once per prompt version and
 model. Each answer is stored as a draft. review shows the drafts one at a
 time beside the summary they came from, to approve or reject. The site shows
@@ -171,6 +175,23 @@ WHERE (%(bills)s::text[] IS NULL
         AND a.source_version_code = s.version_code
         AND a.status = 'approved'
   ))
+  -- Only bills a stored roll call names, or that became law. The loader
+  -- stores every bill so search can find it; the rest are written only
+  -- when named on purpose.
+  AND (%(bills)s::text[] IS NOT NULL
+       OR EXISTS (
+           SELECT 1
+           FROM votes v
+           WHERE v.congress = b.congress
+             AND v.bill_type = b.bill_type
+             AND v.bill_number = b.bill_number
+       )
+       OR EXISTS (
+           SELECT 1
+           FROM bill_actions a
+           WHERE a.bill_id = b.id
+             AND a.action_type = 'BecameLaw'
+       ))
 ORDER BY b.congress, b.bill_type, b.bill_number
 LIMIT %(limit)s;
 """
@@ -402,6 +423,8 @@ def bills_to_write(
     A bill with an approved summary of that CRS version is left out. bills
     narrows the list to those named, such as ['119/hr/1'], and a bill named
     there is returned even if approved, so it can be rewritten on purpose.
+    Only bills a stored vote names, or that became law, are returned,
+    unless named in bills.
     new_only keeps only bills with nothing written from their newest CRS
     summary: no generated summary at all, or approved text or a draft from an
     older stage. An older prompt's drafts and rejections are never written

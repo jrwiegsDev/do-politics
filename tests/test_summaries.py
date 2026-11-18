@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from helpers import add_bill, add_members, last_run, summary
+from helpers import action, add_bill, add_members, add_vote, last_run, summary
 
 from ingest.prompt import (
     PROMPT_VERSION,
@@ -117,10 +117,26 @@ def fake_client(**kwargs):
     return SimpleNamespace(messages=FakeMessages(**kwargs))
 
 
-def add_bill_with(conn, *versions, number=9999):
-    """Store a made-up bill with these CRS summary versions and return its id."""
+def law():
+    """Build a made-up action that says the bill became law."""
+    return action(
+        0, date(2025, 5, 9), "Became Public Law No: 119-1.", action_type="BecameLaw"
+    )
+
+
+def add_bill_with(conn, *versions, number=9999, became_law=True):
+    """Store a made-up bill with these CRS summary versions and return its id.
+
+    The bill became law unless became_law is False, since only bills that a
+    vote names or that became law are drafted.
+    """
     add_members(conn)
-    add_bill(conn, number, summaries=[summary(*version) for version in versions])
+    add_bill(
+        conn,
+        number,
+        summaries=[summary(*version) for version in versions],
+        actions=[law()] if became_law else [],
+    )
     row = conn.execute("SELECT id FROM bills WHERE bill_number = %s", [number])
     return row.fetchone()[0]
 
@@ -218,6 +234,42 @@ def test_a_bill_with_no_summary_is_not_written_from(conn):
     add_bill_with(conn)
 
     assert bills_to_write(conn, OPUS) == []
+
+
+def test_a_bill_no_vote_names_that_did_not_become_law_is_not_written_from(conn):
+    add_bill_with(conn, INTRODUCED, became_law=False)
+
+    assert bills_to_write(conn, OPUS) == []
+    assert bills_to_write(conn, OPUS, new_only=True) == []
+
+
+def test_a_bill_a_vote_names_is_written_from(conn):
+    add_bill_with(conn, INTRODUCED, became_law=False)
+    add_vote(conn, 1, 5, {"T000001": "Yea"})
+
+    assert numbers(bills_to_write(conn, OPUS)) == [9999]
+
+
+def test_a_bill_that_became_law_with_no_vote_is_written_from(conn):
+    add_bill_with(conn, INTRODUCED)
+
+    assert numbers(bills_to_write(conn, OPUS)) == [9999]
+
+
+def test_passing_one_chamber_without_a_vote_is_not_enough(conn):
+    add_members(conn)
+    passed = action(
+        0, date(2025, 3, 3), "Passed/agreed to in House: Passed without objection."
+    )
+    add_bill(conn, 9999, summaries=[summary(*INTRODUCED)], actions=[passed])
+
+    assert bills_to_write(conn, OPUS) == []
+
+
+def test_a_named_bill_is_written_from_with_no_vote_or_law(conn):
+    add_bill_with(conn, INTRODUCED, became_law=False)
+
+    assert numbers(bills_to_write(conn, OPUS, bills=["119/hr/9999"])) == [9999]
 
 
 def test_a_bill_already_answered_by_this_prompt_and_model_is_skipped(conn):
@@ -341,7 +393,9 @@ def test_new_only_respects_the_limit(conn):
 def test_a_newer_summary_is_written_from_again(conn):
     bill_id = add_bill_with(conn, INTRODUCED)
     store(conn, bill_id, "00", PROMPT_VERSION, answer(), Decimal("0.01"))
-    add_bill(conn, 9999, summaries=[summary(*INTRODUCED), summary(*PASSED)])
+    add_bill(
+        conn, 9999, summaries=[summary(*INTRODUCED), summary(*PASSED)], actions=[law()]
+    )
 
     [bill] = bills_to_write(conn, OPUS)
 

@@ -162,14 +162,24 @@ def add_bill(
     save_bill(conn, bill, list(summaries), list(actions))
 
 
-def action(position, acted_on, text, source="Library of Congress", code=None):
-    """Build a made-up bill_actions row, without its bill_id."""
+def action(
+    position,
+    acted_on,
+    text,
+    source="Library of Congress",
+    code=None,
+    action_type="Floor",
+):
+    """Build a made-up bill_actions row, without its bill_id.
+
+    action_type is Congress.gov's kind of step, such as 'Floor' or 'BecameLaw'.
+    """
     return {
         "position": position,
         "acted_on": acted_on,
         "acted_at": None,
         "action_code": code,
-        "action_type": "Floor",
+        "action_type": action_type,
         "source": source,
         "action_text": text,
     }
