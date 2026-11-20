@@ -5,7 +5,7 @@ no test calls the API and none needs a key.
 """
 
 import urllib.error
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from email.message import Message
 
 import psycopg
@@ -13,6 +13,7 @@ import pytest
 from helpers import add_members, add_vote, last_run
 
 from ingest.bills import (
+    NotSettledYet,
     bills_to_download,
     fetch_json,
     list_bills,
@@ -309,7 +310,7 @@ def test_load_saves_each_bill_once_however_many_votes_name_it(
     add_vote(committing_conn, 2, 6, {"T000001": "Nay"})
     api = use(monkeypatch, FakeApi())
 
-    loaded, missing, unknown_sponsor = load(committing_conn, TODAY)
+    loaded, missing, unknown_sponsor, _ = load(committing_conn, TODAY)
 
     recorded = last_run(committing_conn)
     assert (loaded, missing, unknown_sponsor) == (1, [], [])
@@ -331,7 +332,7 @@ def test_load_reports_and_skips_a_bill_that_is_not_found(
     add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
     use(monkeypatch, FakeApi(status=404))
 
-    loaded, missing, _ = load(committing_conn, TODAY)
+    loaded, missing, _, _ = load(committing_conn, TODAY)
 
     assert (loaded, missing) == (0, ["119 hr 9999"])
     assert last_run(committing_conn)["status"] == "succeeded"
@@ -359,7 +360,7 @@ def test_load_stops_at_the_limit(committing_conn, monkeypatch, no_waiting):
     committing_conn.execute("UPDATE votes SET bill_number = 1 WHERE roll_number = 2")
     use(monkeypatch, FakeApi())
 
-    loaded, _, _ = load(committing_conn, TODAY, limit=1)
+    loaded, _, _, _ = load(committing_conn, TODAY, limit=1)
 
     assert loaded == 1
     assert count(committing_conn, "bills") == 1
@@ -426,7 +427,7 @@ def test_a_bill_with_a_wordless_action_is_saved_and_the_run_succeeds(
     bill = BILL | {"actions": {"count": 5}}
     use(monkeypatch, FakeApi(bill=bill, actions=[*ACTIONS, WORDLESS]))
 
-    loaded, _, _ = load(committing_conn, TODAY)
+    loaded, _, _, _ = load(committing_conn, TODAY)
 
     assert loaded == 1
     assert count(committing_conn, "bill_actions") == 4
@@ -457,6 +458,76 @@ def test_read_bill_refuses_an_action_list_shorter_than_the_bill_says(monkeypatch
 
     with pytest.raises(ValueError, match="5 actions but only 4 were sent"):
         read_bill(119, "hr", 9999)
+
+
+# When BILL's record last changed, its updateDate.
+BILL_CHANGED_AT = datetime(2026, 9, 19, 23, 7, 8, tzinfo=UTC)
+
+
+def test_read_bill_leaves_a_short_action_list_for_later_if_the_bill_just_changed(
+    monkeypatch,
+):
+    # H.R. 2785 on 2026-11-20: read 25 minutes after it changed, its record
+    # counted 8 actions while its list of actions still sent the old 5.
+    use(monkeypatch, FakeApi(bill=BILL | {"actions": {"count": 5}}))
+
+    with pytest.raises(NotSettledYet, match="5 actions but only 4 were sent"):
+        read_bill(119, "hr", 9999, now=BILL_CHANGED_AT + timedelta(minutes=25))
+
+
+def test_read_bill_leaves_a_short_summary_list_for_later_if_the_bill_just_changed(
+    monkeypatch,
+):
+    use(monkeypatch, FakeApi(bill=BILL | {"summaries": {"count": 3}}))
+
+    with pytest.raises(NotSettledYet, match="3 summaries but only 2 were sent"):
+        read_bill(119, "hr", 9999, now=BILL_CHANGED_AT + timedelta(hours=23))
+
+
+@pytest.mark.parametrize("later", [timedelta(hours=24), timedelta(days=30)])
+def test_read_bill_refuses_a_short_action_list_once_the_bill_has_had_a_day(
+    monkeypatch, later
+):
+    use(monkeypatch, FakeApi(bill=BILL | {"actions": {"count": 5}}))
+
+    with pytest.raises(ValueError, match="5 actions but only 4 were sent"):
+        read_bill(119, "hr", 9999, now=BILL_CHANGED_AT + later)
+
+
+def test_read_bill_saves_a_whole_list_from_a_bill_that_just_changed(monkeypatch):
+    use(monkeypatch, FakeApi(bill=WITH_ACTIONS))
+
+    _, _, actions = read_bill(
+        119, "hr", 9999, now=BILL_CHANGED_AT + timedelta(minutes=1)
+    )
+
+    assert len(actions) == 4
+
+
+def test_load_leaves_an_unsettled_bill_for_the_next_run_which_saves_it(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
+    an_hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    just_changed = BILL | {"updateDate": an_hour_ago}
+    use(monkeypatch, FakeApi(bill=just_changed | {"actions": {"count": 5}}))
+
+    loaded, _, _, unsettled = load(committing_conn, TODAY)
+
+    assert (loaded, count(committing_conn, "bills")) == (0, 0)
+    assert unsettled == [
+        "119 hr 9999 (bill/119/hr/9999 has 5 actions but only 4 were sent)"
+    ]
+    assert last_run(committing_conn)["status"] == "succeeded"
+
+    # By the next run the list has caught up with the record.
+    use(monkeypatch, FakeApi(bill=just_changed | {"actions": {"count": 4}}))
+
+    loaded, _, _, unsettled = load(committing_conn, TODAY)
+
+    assert (loaded, unsettled) == (1, [])
+    assert count(committing_conn, "bill_actions") == 4
 
 
 def test_read_bill_asks_for_actions_even_when_the_bill_has_no_summaries(monkeypatch):
@@ -532,7 +603,7 @@ def test_load_saves_each_bill_with_its_actions(
     add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
     use(monkeypatch, FakeApi(bill=WITH_ACTIONS))
 
-    loaded, _, _ = load(committing_conn, TODAY)
+    loaded, _, _, _ = load(committing_conn, TODAY)
 
     assert loaded == 1
     assert count(committing_conn, "bill_actions") == 4
@@ -656,7 +727,7 @@ def test_load_downloads_listed_bills_that_no_vote_names(
     add_members(committing_conn)
     api = use(monkeypatch, FakeApi(listing=[listed(1), listed(2)]))
 
-    loaded, _, _ = load(committing_conn, TODAY)
+    loaded, _, _, _ = load(committing_conn, TODAY)
 
     assert loaded == 2
     assert {"bill/119/hr/1", "bill/119/hr/2"} <= set(api.asked)
@@ -669,7 +740,7 @@ def test_load_leaves_a_stored_bill_that_has_not_changed(
     add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
     api = use(monkeypatch, FakeApi(listing=[listed(9999, "2026-11-08")]))
 
-    loaded, _, _ = load(committing_conn, TODAY)
+    loaded, _, _, _ = load(committing_conn, TODAY)
 
     assert loaded == 0
     assert api.asked == ["bill/119"]
@@ -681,7 +752,7 @@ def test_load_downloads_a_stored_bill_that_changed(
     stored_and_downloaded_on(committing_conn, "2026-11-10")
     use(monkeypatch, FakeApi(listing=[listed(9999, "2026-11-16")]))
 
-    loaded, _, _ = load(committing_conn, TODAY)
+    loaded, _, _, _ = load(committing_conn, TODAY)
 
     assert loaded == 1
 
@@ -693,7 +764,7 @@ def test_load_skips_and_reports_a_bill_whose_sponsor_is_not_known_yet(
     newcomer = BILL | {"sponsors": [{"bioguideId": "N000001"}]}
     use(monkeypatch, FakeApi(bill=newcomer, listing=[listed(1)]))
 
-    loaded, _, unknown_sponsor = load(committing_conn, TODAY)
+    loaded, _, unknown_sponsor, _ = load(committing_conn, TODAY)
 
     assert (loaded, unknown_sponsor) == (0, ["119 hr 1 (N000001)"])
     assert count(committing_conn, "bills") == 0
@@ -704,7 +775,7 @@ def test_load_skips_a_bill_with_no_sponsor(committing_conn, monkeypatch, no_wait
     add_members(committing_conn)
     use(monkeypatch, FakeApi(bill=BILL | {"sponsors": []}, listing=[listed(1)]))
 
-    loaded, _, unknown_sponsor = load(committing_conn, TODAY)
+    loaded, _, unknown_sponsor, _ = load(committing_conn, TODAY)
 
     assert (loaded, unknown_sponsor) == (0, ["119 hr 1 (None)"])
 
@@ -778,8 +849,8 @@ def test_load_stops_at_the_limit_and_the_next_run_carries_on(
     ]
     use(monkeypatch, FakeApi(listing=listing))
 
-    first, _, _ = load(committing_conn, TODAY, limit=2)
-    second, _, _ = load(committing_conn, TODAY, limit=2)
+    first, _, _, _ = load(committing_conn, TODAY, limit=2)
+    second, _, _, _ = load(committing_conn, TODAY, limit=2)
 
     assert (first, second) == (2, 1)
     assert count(committing_conn, "bills") == 3

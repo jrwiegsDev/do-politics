@@ -34,6 +34,13 @@ A bill's actions are every step it has taken: introduced, referred, passed
 by recorded vote or by voice vote, signed. They have no identifier of their
 own, so each run replaces a bill's whole list instead of matching action to
 action.
+
+A bill's record counts its summaries and actions, and a list shorter than
+the count is not stored. Right after a bill changes, Congress.gov can update
+the record before the list catches up, so a bill that changed less than
+SETTLING_TIME ago is left for the next run and reported, and the run still
+succeeds. A short list from a bill that changed longer ago than that fails
+the run, naming the bill.
 """
 
 import argparse
@@ -43,7 +50,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from itertools import islice
 from time import sleep
 
@@ -70,6 +77,11 @@ PAUSE_SECONDS = 0.25
 # The API sends 20 items at a time unless asked for more, and 250 is the most
 # it sends in one answer: bills in a list, a bill's summaries or its actions.
 MOST_PER_REQUEST = 250
+
+# How long Congress.gov may take to bring a changed bill's lists in line with
+# its record. On 2026-11-20 the record of H.R. 2785 counted 8 actions 25
+# minutes after it changed, while its list of actions still sent the old 5.
+SETTLING_TIME = timedelta(hours=24)
 
 BILL_TYPES = {"hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"}
 
@@ -282,6 +294,28 @@ def to_summary_row(summary: dict) -> dict:
     }
 
 
+class NotSettledYet(Exception):
+    """A bill changed so recently that its lists may not have caught up yet.
+
+    Not a ValueError, so load can tell it apart from a record it cannot read.
+    """
+
+
+def short_list(
+    path: str, kind: str, expected: int, sent: int, changed_at: datetime, now: datetime
+) -> Exception:
+    """Return the error for a list shorter than the bill's own record says.
+
+    A bill that changed less than SETTLING_TIME before now gets NotSettledYet:
+    the list may only be behind the record. An older bill gets ValueError: the
+    list was cut short, and part of a history must not be stored as all of it.
+    """
+    message = f"{path} has {expected} {kind} but only {sent} were sent"
+    if now - changed_at < SETTLING_TIME:
+        return NotSettledYet(message)
+    return ValueError(message)
+
+
 def to_action_rows(actions: list[dict]) -> list[dict]:
     """Turn a bill's actions, as Congress.gov lists them, into bill_actions rows.
 
@@ -313,13 +347,15 @@ def to_action_rows(actions: list[dict]) -> list[dict]:
     return rows
 
 
-def read_actions(path: str, expected: int) -> list[dict]:
+def read_actions(
+    path: str, expected: int, changed_at: datetime, now: datetime
+) -> list[dict]:
     """Download the actions of the bill at path and return them as rows.
 
-    expected is how many the bill's own record says it has. A list longer
-    than MOST_PER_REQUEST, such as a defense authorization's, is asked for
-    page by page. Fewer than expected means the list was cut short, so the
-    bill is refused rather than store part of its history as all of it.
+    expected is how many the bill's own record says it has, and changed_at
+    is when that record last changed. A list longer than MOST_PER_REQUEST,
+    such as a defense authorization's, is asked for page by page. Fewer
+    than expected raises the error short_list picks.
     """
     actions = []
     while len(actions) < expected:
@@ -333,20 +369,21 @@ def read_actions(path: str, expected: int) -> list[dict]:
             break
 
     if len(actions) < expected:
-        raise ValueError(
-            f"{path} has {expected} actions but only {len(actions)} were sent"
-        )
+        raise short_list(path, "actions", expected, len(actions), changed_at, now)
     return to_action_rows(actions)
 
 
 def read_bill(
-    congress: int, bill_type: str, bill_number: int
+    congress: int, bill_type: str, bill_number: int, now: datetime | None = None
 ) -> tuple[dict, list[dict], list[dict]]:
     """Download one bill and return its row, its summary rows and its action rows.
 
     The bill's own record says how many summaries and actions it has, so a
-    bill with none of either costs no request for it.
+    bill with none of either costs no request for it. now is when the bill
+    is read, the current time unless a test sets it.
     """
+    if now is None:
+        now = datetime.now(UTC)
     path = f"bill/{congress}/{bill_type}/{bill_number}"
     bill = fetch_json(path)["bill"]
     row = to_bill_row(bill)
@@ -356,6 +393,7 @@ def read_bill(
     if found != asked:
         raise ValueError(f"{path} says it is {found}; expected {asked}")
 
+    changed_at = row["source_updated_at"]
     summaries = []
     expected = (bill.get("summaries") or {}).get("count", 0)
     if expected:
@@ -365,11 +403,12 @@ def read_bill(
             "summaries"
         ]
         if len(summaries) < expected:
-            raise ValueError(
-                f"{path} has {expected} summaries but only {len(summaries)} were sent"
+            raise short_list(
+                path, "summaries", expected, len(summaries), changed_at, now
             )
 
-    actions = read_actions(path, (bill.get("actions") or {}).get("count", 0))
+    expected = (bill.get("actions") or {}).get("count", 0)
+    actions = read_actions(path, expected, changed_at, now)
 
     return row, [to_summary_row(summary) for summary in summaries], actions
 
@@ -418,23 +457,25 @@ def bills_due(conn, today: date) -> list[tuple[int, str, int]]:
 
 def load(
     conn, today: date, limit: int | None = None
-) -> tuple[int, list[str], list[str]]:
+) -> tuple[int, list[str], list[str], list[str]]:
     """Load every new or changed bill of the stored Congresses, as one recorded run.
 
     Returns how many bills were saved, the bills Congress.gov does not have,
-    and the bills skipped because their sponsor is not a known member. Each
-    bill is committed with its summaries and actions as soon as it is saved,
-    so a run that stops partway keeps the bills already saved, and the next
-    run picks up the rest. limit caps how many bills are downloaded.
+    the bills skipped because their sponsor is not a known member, and the
+    bills left for the next run because they have not settled. Each bill is
+    committed with its summaries and actions as soon as it is saved, so a
+    run that stops partway keeps the bills already saved, and the next run
+    picks up the rest. limit caps how many bills are downloaded.
 
-    A bill that is not found, or whose sponsor is not known yet, is reported
-    and skipped. A record that cannot be read is skipped too, so one bad
+    A bill that is not found, whose sponsor is not known yet, or that has
+    not settled is reported and skipped; it is not saved, so the next run
+    tries it again. A record that cannot be read is skipped too, so one bad
     record cannot block the bills after it, but the run is marked failed at
     the end, naming them. Any other failure fails the run at once.
     """
     with record_run(conn, JOB, SOURCE) as run:
         known = {bioguide_id for (bioguide_id,) in conn.execute(MEMBER_IDS_SQL)}
-        missing, unknown_sponsor, unreadable = [], [], []
+        missing, unknown_sponsor, unsettled, unreadable = [], [], [], []
 
         for congress, bill_type, bill_number in islice(bills_due(conn, today), limit):
             name = f"{congress} {bill_type} {bill_number}"
@@ -444,6 +485,9 @@ def load(
                 if error.code != 404:
                     raise
                 missing.append(name)
+                continue
+            except NotSettledYet as error:
+                unsettled.append(f"{name} ({error})")
                 continue
             except (KeyError, IndexError, ValueError) as error:
                 unreadable.append(f"{name}: {error!r}")
@@ -467,7 +511,7 @@ def load(
                 + "; ".join(unreadable[:10])
             )
 
-    return run.rows_loaded, missing, unknown_sponsor
+    return run.rows_loaded, missing, unknown_sponsor, unsettled
 
 
 def main() -> None:
@@ -477,12 +521,16 @@ def main() -> None:
     args = parser.parse_args()
 
     with connect() as conn:
-        loaded, missing, unknown_sponsor = load(conn, today_in_washington(), args.limit)
+        loaded, missing, unknown_sponsor, unsettled = load(
+            conn, today_in_washington(), args.limit
+        )
     print(f"{loaded} bills loaded from {SOURCE}")
     for bill in missing:
         print(f"  not found on Congress.gov: {bill}")
     for bill in unknown_sponsor:
         print(f"  sponsor not yet in members, tried again next run: {bill}")
+    for bill in unsettled:
+        print(f"  changed in the last day, not settled, tried again next run: {bill}")
 
 
 if __name__ == "__main__":
