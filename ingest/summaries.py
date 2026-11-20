@@ -60,8 +60,9 @@ from decimal import Decimal
 import anthropic
 from psycopg.rows import dict_row
 
-from app.bills import bill_label
+from ingest.congress import bill_label, bill_name
 from ingest.db import connect
+from ingest.logs import counted
 from ingest.prompt import (
     PROMPT_VERSION,
     REDRAFT_PROMPT_VERSION,
@@ -551,10 +552,14 @@ def fit_to_budget(
     )
     left = [row for position, row in enumerate(rows) if position not in kept]
     if left:
-        labels = ", ".join(
-            bill_label(row["bill_type"], row["bill_number"]) for row in left
+        names = ", ".join(
+            bill_name(row["congress"], row["bill_type"], row["bill_number"])
+            for row in left
         )
-        print(f"{len(left)} left for the next run, to stay within the budget: {labels}")
+        print(
+            f"{counted(len(left), 'bill')} left for the next run, "
+            f"to stay within the budget: {names}"
+        )
     return [rows[position] for position in keep], [
         requests[position] for position in keep
     ]
@@ -613,7 +618,6 @@ def store(
     """
     answer = read_answer(message)
     if answer is None:
-        print(f"  bill {bill_id}: not stored, it ended with {message.stop_reason}")
         return False
 
     inserted = conn.execute(
@@ -658,10 +662,12 @@ def sample(
             stored = store(conn, bill_id, version_code, PROMPT_VERSION, message, cost)
             run.rows_loaded += stored
             run.commit(conn)
-            label = bill_label(bill["bill_type"], bill["bill_number"])
-            print(f"  {label}: ${cost:.4f}", flush=True)
+            name = bill_name(bill["congress"], bill["bill_type"], bill["bill_number"])
+            print(f"{name}: ${cost:.4f}", flush=True)
             answer = read_answer(message)
-            if answer is not None:
+            if answer is None:
+                print(f"  Not stored: the answer ended with {message.stop_reason}.")
+            else:
                 print(f"\n{answer['plain_summary']}\n")
                 print(f"How this does you:\n{answer['impact']}\n", flush=True)
     print(f"Spent ${spent:.4f}.")
@@ -716,6 +722,11 @@ def collect(conn, client, batch_id: str) -> Decimal | None:
             run.rows_loaded += store(
                 conn, int(bill_id), version_code, prompt_version, message, cost
             )
+            if read_answer(message) is None:
+                print(
+                    f"  {result.custom_id}: not stored, the answer ended with "
+                    f"{message.stop_reason}"
+                )
     print(f"The batch cost ${spent:.4f}. {run.rows_loaded} new drafts stored.")
     return spent
 
@@ -816,10 +827,11 @@ def revise(
                 revised_from=row["revised_from"],
             )
             run.commit(conn)
-            label = bill_label(row["bill_type"], row["bill_number"])
-            print(f"  {label}, {row['kind']}: ${cost:.4f}", flush=True)
+            name = bill_name(row["congress"], row["bill_type"], row["bill_number"])
+            print(f"{name}, {row['kind']}: ${cost:.4f}", flush=True)
             answer = read_answer(message)
             if answer is None:
+                print(f"  Not stored: the answer ended with {message.stop_reason}.")
                 continue
             if row["kind"] == "redraft":
                 print(f"\n{answer['plain_summary']}\n")

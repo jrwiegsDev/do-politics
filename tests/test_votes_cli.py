@@ -52,7 +52,7 @@ def test_congress_and_session_together_load_that_session(calls, monkeypatch, cap
 
     printed = capsys.readouterr().out
     assert calls == [("load", "house", 119, 1, None)]
-    assert "3 house votes loaded from house-clerk" in printed
+    assert "3 House votes loaded from house-clerk" in printed
     assert "Congress 119, session 1" in printed
 
 
@@ -63,7 +63,7 @@ def test_neither_congress_nor_session_loads_the_current_sessions(
 
     printed = capsys.readouterr().out
     assert calls == [("load_current", "senate", 2)]
-    assert "5 senate votes loaded from senate-lis" in printed
+    assert "5 Senate votes loaded from senate-lis" in printed
 
 
 @pytest.mark.parametrize("arguments", [["--congress", "119"], ["--session", "1"]])

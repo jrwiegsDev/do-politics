@@ -545,9 +545,12 @@ def test_load_reports_a_question_wording_with_no_rule(
 
     load(committing_conn, "house", 119, 2)
 
-    printed = capsys.readouterr().out
-    assert "new question wording" in printed
-    assert "On Something New" in printed
+    vote_line, wording_line = capsys.readouterr().out.splitlines()
+    assert vote_line.startswith("House roll call 1: ")
+    assert vote_line.endswith(" members' votes")
+    # Indented under the vote it belongs to.
+    assert wording_line.startswith("  new question wording")
+    assert "On Something New" in wording_line
 
 
 def test_addresses_follow_the_congress_and_session():

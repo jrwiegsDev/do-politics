@@ -23,7 +23,7 @@ from time import sleep
 from ingest.bills import fetch_json
 from ingest.db import connect
 from ingest.fetch import read_url
-from ingest.logs import configure_logging
+from ingest.logs import configure_logging, counted, print_list
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
@@ -186,9 +186,8 @@ def main() -> None:
 
     with connect() as conn:
         saved, unchanged, missing = load(conn, args.limit)
-    print(f"{saved} photos new or changed, {unchanged} unchanged")
-    for bioguide_id in missing:
-        print(f"  no photo found: {bioguide_id}")
+    print(f"{counted(saved, 'photo')} new or changed, {unchanged} unchanged")
+    print_list(f"{counted(len(missing), 'member')} with no photo found:", missing)
 
 
 if __name__ == "__main__":

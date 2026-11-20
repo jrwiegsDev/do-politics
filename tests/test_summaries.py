@@ -509,7 +509,10 @@ def test_sample_sends_what_fits_and_leaves_the_rest(committing_conn, capsys):
     assert len(client.messages.sent) == 2
     assert len(stored_rows(conn)) == 2
     shown = capsys.readouterr().out
-    assert "1 left for the next run, to stay within the budget: H.R. 9999" in shown
+    assert (
+        "1 bill left for the next run, to stay within the budget: "
+        "H.R. 9999 (119th Congress)" in shown
+    )
     # The next run takes the one left.
     assert numbers(bills_to_write(conn, OPUS, new_only=True)) == [9999]
 
@@ -538,7 +541,7 @@ def test_revise_sends_what_fits_and_leaves_the_rest(committing_conn, capsys):
 
     assert len(client.messages.sent) == 1
     assert len(redrafts_due(conn)) == 2
-    assert "2 left for the next run" in capsys.readouterr().out
+    assert "2 bills left for the next run" in capsys.readouterr().out
 
 
 def test_the_nightly_summary_jobs_send_what_fits():
@@ -1044,7 +1047,7 @@ def test_a_redraft_is_stored_as_a_draft_that_points_back(committing_conn, capsys
     ).fetchone()
     assert row == ("draft", REDRAFT_PROMPT_VERSION, rejected, "49", "Redrafted.")
     shown = capsys.readouterr().out
-    assert "H.R. 9999, redraft:" in shown
+    assert "H.R. 9999 (119th Congress), redraft: $" in shown
     assert "Redrafted." in shown
 
 

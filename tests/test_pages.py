@@ -19,11 +19,10 @@ from helpers import (
     summary,
 )
 
-from app.bills import bill_label
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
-from app.pages import ordinal
 from app.ratelimit import LOOKUP_LIMIT
+from ingest.congress import bill_label, ordinal
 
 CAPITOL = (-89.6548, 39.7984)
 MID_ATLANTIC = (-40.0, 35.0)

@@ -28,7 +28,7 @@ from ingest.categories import categorize, is_known
 from ingest.congress import session_year, sessions_to_check, today_in_washington
 from ingest.db import connect
 from ingest.fetch import read_url
-from ingest.logs import configure_logging
+from ingest.logs import configure_logging, counted
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
 
@@ -349,7 +349,8 @@ def load(
             save(conn, vote, positions)
             run.rows_loaded += 1
             run.commit(conn)
-            print(f"{chamber} {vote['roll_number']}: {len(positions)} positions")
+            votes_cast = counted(len(positions), "member's vote", "members' votes")
+            print(f"{chamber.title()} roll call {vote['roll_number']}: {votes_cast}")
             if not is_known(vote):
                 print(
                     f"  new question wording, counted as procedural: {vote['question']!r}"
@@ -429,9 +430,8 @@ def main() -> None:
         else:
             checked = f"Congress {args.congress}, session {args.session}"
             loaded = load(conn, args.chamber, args.congress, args.session, args.limit)
-    print(
-        f"{loaded} {args.chamber} votes loaded from {SOURCES[args.chamber]} ({checked})"
-    )
+    loaded_votes = counted(loaded, f"{args.chamber.title()} vote")
+    print(f"{loaded_votes} loaded from {SOURCES[args.chamber]} ({checked})")
 
 
 if __name__ == "__main__":

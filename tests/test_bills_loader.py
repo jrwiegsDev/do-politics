@@ -259,7 +259,7 @@ def test_read_bill_refuses_a_record_for_a_different_bill(monkeypatch):
 def test_read_bill_refuses_a_list_shorter_than_the_bill_says(monkeypatch):
     use(monkeypatch, FakeApi(bill=BILL | {"summaries": {"count": 3}}))
 
-    with pytest.raises(ValueError, match="only 2 were sent"):
+    with pytest.raises(ValueError, match="lists 3 summaries, but Congress.gov sent 2"):
         read_bill(119, "hr", 9999)
 
 
@@ -334,7 +334,7 @@ def test_load_reports_and_skips_a_bill_that_is_not_found(
 
     loaded, missing, _, _ = load(committing_conn, TODAY)
 
-    assert (loaded, missing) == (0, ["119 hr 9999"])
+    assert (loaded, missing) == (0, ["H.R. 9999 (119th Congress)"])
     assert last_run(committing_conn)["status"] == "succeeded"
 
 
@@ -434,6 +434,19 @@ def test_a_bill_with_a_wordless_action_is_saved_and_the_run_succeeds(
     assert last_run(committing_conn)["status"] == "succeeded"
 
 
+def test_load_names_each_bill_it_saves_the_way_the_site_does(
+    committing_conn, monkeypatch, no_waiting, capsys
+):
+    add_members(committing_conn)
+    add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
+    use(monkeypatch, FakeApi(bill=WITH_ACTIONS))
+
+    load(committing_conn, TODAY)
+
+    printed = capsys.readouterr().out
+    assert printed == "H.R. 9999 (119th Congress): 2 summaries, 4 actions\n"
+
+
 def test_read_bill_asks_for_up_to_250_actions_in_one_request(monkeypatch):
     api = use(monkeypatch, FakeApi(bill=WITH_ACTIONS))
 
@@ -456,7 +469,7 @@ def test_read_bill_does_not_ask_for_actions_when_the_bill_has_none(monkeypatch):
 def test_read_bill_refuses_an_action_list_shorter_than_the_bill_says(monkeypatch):
     use(monkeypatch, FakeApi(bill=BILL | {"actions": {"count": 5}}))
 
-    with pytest.raises(ValueError, match="5 actions but only 4 were sent"):
+    with pytest.raises(ValueError, match="lists 5 actions, but Congress.gov sent 4"):
         read_bill(119, "hr", 9999)
 
 
@@ -471,7 +484,7 @@ def test_read_bill_leaves_a_short_action_list_for_later_if_the_bill_just_changed
     # counted 8 actions while its list of actions still sent the old 5.
     use(monkeypatch, FakeApi(bill=BILL | {"actions": {"count": 5}}))
 
-    with pytest.raises(NotSettledYet, match="5 actions but only 4 were sent"):
+    with pytest.raises(NotSettledYet, match="lists 5 actions, but Congress.gov sent 4"):
         read_bill(119, "hr", 9999, now=BILL_CHANGED_AT + timedelta(minutes=25))
 
 
@@ -480,7 +493,9 @@ def test_read_bill_leaves_a_short_summary_list_for_later_if_the_bill_just_change
 ):
     use(monkeypatch, FakeApi(bill=BILL | {"summaries": {"count": 3}}))
 
-    with pytest.raises(NotSettledYet, match="3 summaries but only 2 were sent"):
+    with pytest.raises(
+        NotSettledYet, match="lists 3 summaries, but Congress.gov sent 2"
+    ):
         read_bill(119, "hr", 9999, now=BILL_CHANGED_AT + timedelta(hours=23))
 
 
@@ -490,7 +505,7 @@ def test_read_bill_refuses_a_short_action_list_once_the_bill_has_had_a_day(
 ):
     use(monkeypatch, FakeApi(bill=BILL | {"actions": {"count": 5}}))
 
-    with pytest.raises(ValueError, match="5 actions but only 4 were sent"):
+    with pytest.raises(ValueError, match="lists 5 actions, but Congress.gov sent 4"):
         read_bill(119, "hr", 9999, now=BILL_CHANGED_AT + later)
 
 
@@ -517,7 +532,7 @@ def test_load_leaves_an_unsettled_bill_for_the_next_run_which_saves_it(
 
     assert (loaded, count(committing_conn, "bills")) == (0, 0)
     assert unsettled == [
-        "119 hr 9999 (bill/119/hr/9999 has 5 actions but only 4 were sent)"
+        "H.R. 9999 (119th Congress): the bill lists 5 actions, but Congress.gov sent 4"
     ]
     assert last_run(committing_conn)["status"] == "succeeded"
 
@@ -766,7 +781,10 @@ def test_load_skips_and_reports_a_bill_whose_sponsor_is_not_known_yet(
 
     loaded, _, unknown_sponsor, _ = load(committing_conn, TODAY)
 
-    assert (loaded, unknown_sponsor) == (0, ["119 hr 1 (N000001)"])
+    assert (loaded, unknown_sponsor) == (
+        0,
+        ["H.R. 1 (119th Congress): sponsor N000001"],
+    )
     assert count(committing_conn, "bills") == 0
     assert last_run(committing_conn)["status"] == "succeeded"
 
@@ -777,7 +795,7 @@ def test_load_skips_a_bill_with_no_sponsor(committing_conn, monkeypatch, no_wait
 
     loaded, _, unknown_sponsor, _ = load(committing_conn, TODAY)
 
-    assert (loaded, unknown_sponsor) == (0, ["119 hr 1 (None)"])
+    assert (loaded, unknown_sponsor) == (0, ["H.R. 1 (119th Congress): sponsor None"])
 
 
 def test_load_saves_the_readable_bills_then_fails_naming_an_unreadable_one(
@@ -794,7 +812,9 @@ def test_load_saves_the_readable_bills_then_fails_naming_an_unreadable_one(
     listing = [listed(1, "2026-11-16"), listed(2, "2026-11-15")]
     use(monkeypatch, OneUntitled(listing=listing))
 
-    with pytest.raises(ValueError, match="Could not read 1 of the bills: 119 hr 1"):
+    with pytest.raises(
+        ValueError, match="Could not read 1 bill: H.R. 1 \\(119th Congress\\): KeyError"
+    ):
         load(committing_conn, TODAY)
 
     assert count(committing_conn, "bills") == 1

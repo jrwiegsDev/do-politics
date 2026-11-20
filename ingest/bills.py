@@ -54,10 +54,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from itertools import islice
 from time import sleep
 
-from ingest.congress import congresses_since, today_in_washington
+from ingest.congress import bill_name, congresses_since, today_in_washington
 from ingest.db import connect
 from ingest.fetch import read_url
-from ingest.logs import configure_logging
+from ingest.logs import configure_logging, counted, print_list
 from ingest.plain_text import html_to_text
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
@@ -302,15 +302,22 @@ class NotSettledYet(Exception):
 
 
 def short_list(
-    path: str, kind: str, expected: int, sent: int, changed_at: datetime, now: datetime
+    singular: str,
+    plural: str,
+    expected: int,
+    sent: int,
+    changed_at: datetime,
+    now: datetime,
 ) -> Exception:
     """Return the error for a list shorter than the bill's own record says.
 
-    A bill that changed less than SETTLING_TIME before now gets NotSettledYet:
-    the list may only be behind the record. An older bill gets ValueError: the
+    singular and plural name what is listed, 'action' and 'actions'. A bill
+    that changed less than SETTLING_TIME before now gets NotSettledYet: the
+    list may only be behind the record. An older bill gets ValueError: the
     list was cut short, and part of a history must not be stored as all of it.
     """
-    message = f"{path} has {expected} {kind} but only {sent} were sent"
+    listed = counted(expected, singular, plural)
+    message = f"the bill lists {listed}, but Congress.gov sent {sent}"
     if now - changed_at < SETTLING_TIME:
         return NotSettledYet(message)
     return ValueError(message)
@@ -369,7 +376,7 @@ def read_actions(
             break
 
     if len(actions) < expected:
-        raise short_list(path, "actions", expected, len(actions), changed_at, now)
+        raise short_list("action", "actions", expected, len(actions), changed_at, now)
     return to_action_rows(actions)
 
 
@@ -404,7 +411,7 @@ def read_bill(
         ]
         if len(summaries) < expected:
             raise short_list(
-                path, "summaries", expected, len(summaries), changed_at, now
+                "summary", "summaries", expected, len(summaries), changed_at, now
             )
 
     expected = (bill.get("actions") or {}).get("count", 0)
@@ -478,7 +485,7 @@ def load(
         missing, unknown_sponsor, unsettled, unreadable = [], [], [], []
 
         for congress, bill_type, bill_number in islice(bills_due(conn, today), limit):
-            name = f"{congress} {bill_type} {bill_number}"
+            name = bill_name(congress, bill_type, bill_number)
             try:
                 bill, summaries, actions = read_bill(congress, bill_type, bill_number)
             except urllib.error.HTTPError as error:
@@ -487,27 +494,25 @@ def load(
                 missing.append(name)
                 continue
             except NotSettledYet as error:
-                unsettled.append(f"{name} ({error})")
+                unsettled.append(f"{name}: {error}")
                 continue
             except (KeyError, IndexError, ValueError) as error:
-                unreadable.append(f"{name}: {error!r}")
+                unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
 
             if bill["sponsor_bioguide_id"] not in known:
-                unknown_sponsor.append(f"{name} ({bill['sponsor_bioguide_id']})")
+                unknown_sponsor.append(f"{name}: sponsor {bill['sponsor_bioguide_id']}")
                 continue
 
             save(conn, bill, summaries, actions)
             run.rows_loaded += 1
             run.commit(conn)
-            print(
-                f"{name}: {len(summaries)} summaries, {len(actions)} actions",
-                flush=True,
-            )
+            found = counted(len(summaries), "summary", "summaries")
+            print(f"{name}: {found}, {counted(len(actions), 'action')}", flush=True)
 
         if unreadable:
             raise ValueError(
-                f"Could not read {len(unreadable)} of the bills: "
+                f"Could not read {counted(len(unreadable), 'bill')}: "
                 + "; ".join(unreadable[:10])
             )
 
@@ -524,13 +529,22 @@ def main() -> None:
         loaded, missing, unknown_sponsor, unsettled = load(
             conn, today_in_washington(), args.limit
         )
-    print(f"{loaded} bills loaded from {SOURCE}")
-    for bill in missing:
-        print(f"  not found on Congress.gov: {bill}")
-    for bill in unknown_sponsor:
-        print(f"  sponsor not yet in members, tried again next run: {bill}")
-    for bill in unsettled:
-        print(f"  changed in the last day, not settled, tried again next run: {bill}")
+    print(f"{counted(loaded, 'bill')} loaded from {SOURCE}")
+    print_list(
+        f"{counted(len(missing), 'bill')} not found on Congress.gov, skipped:",
+        missing,
+    )
+    print_list(
+        f"{counted(len(unknown_sponsor), 'bill')} skipped until the next run "
+        "(sponsor not in the members table yet):",
+        unknown_sponsor,
+    )
+    hours = SETTLING_TIME // timedelta(hours=1)
+    print_list(
+        f"{counted(len(unsettled), 'bill')} skipped until the next run "
+        f"(changed on Congress.gov in the last {hours} hours, still being updated there):",
+        unsettled,
+    )
 
 
 if __name__ == "__main__":
