@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from app.address import Address
 from app.bills import (
     BillType,
-    bill_label,
     find_bill,
     find_bill_topics,
     find_member_votes,
@@ -32,7 +31,7 @@ from app.pay import (
 )
 from app.search import MAX_LENGTH, read_search
 from app.votes import find_attendance, find_policy_areas, find_recent_votes
-from ingest.congress import today_in_washington
+from ingest.congress import bill_label, ordinal, today_in_washington
 
 # How many votes the member tile shows at a time.
 PAGE_SIZE = 20
@@ -72,17 +71,6 @@ def dollars(amount: int) -> str:
 def vote_date(moment: datetime) -> str:
     """Return the day a vote was held, in Washington's time, such as 'Sep 16, 2026'."""
     return long_date(moment.astimezone(EASTERN))
-
-
-def ordinal(number: int) -> str:
-    """Return a number as an ordinal, such as '119th', '121st' or '122nd'."""
-    suffixes = {1: "st", 2: "nd", 3: "rd"}
-    # 11, 12 and 13 take 'th', as in '111th', though they end in 1, 2 and 3.
-    if 11 <= number % 100 <= 13:
-        suffix = "th"
-    else:
-        suffix = suffixes.get(number % 10, "th")
-    return f"{number}{suffix}"
 
 
 # A template uses these as {{ vote.voted_at | vote_date }}, {{ bill.introduced_on
