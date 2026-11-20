@@ -197,3 +197,33 @@ Nothing saved is lost. The bills, votes and photo loaders commit each record as 
 
    `rows_loaded` on a failed run is the rows it kept.
 3. Leave it for the next scheduled run, or open the job and click **Trigger Run** to catch up now. A rerun does not repeat the work already saved.
+
+## When load-bills fails with "has N actions but only M were sent"
+
+`load-bills` shows **Failed run**, and its **Logs** end with:
+
+```
+ValueError: Could not read 2 of the bills: 119 hr 2785: ValueError('bill/119/hr/2785 has 8 actions but only 5 were sent'); ...
+```
+
+The run went to the end first: every other bill was saved. A bill's record counts its actions and summaries, and a list shorter than the count is never stored, so part of a history can't pass for all of it.
+
+Right after a bill changes, Congress.gov can update the record before its lists catch up. The loader allows for that: a bill that changed less than 24 hours before it was read (`SETTLING_TIME` in `ingest/bills.py`) is not a failure. It is listed near the end of the logs as `changed in the last day, not settled, tried again next run`, and the run succeeds. On 2026-11-20, before this was added, H.R. 2785 and H.R. 8276 failed a run this way 25 minutes after a committee markup.
+
+So this failure means a bill that changed more than a day ago still disagrees with itself, or the loader's paging cut a list short.
+
+1. Fetch the bill and its list from your Mac, read-only, from the project folder:
+
+   ```
+   set -a; source .env; set +a
+   uv run --no-sync python - <<'EOF'
+   from ingest.bills import fetch_json
+
+   path = "bill/119/hr/2785"
+   bill = fetch_json(path)["bill"]
+   actions = fetch_json(f"{path}/actions", {"limit": 250})
+   print(bill["updateDate"], bill["actions"]["count"], len(actions["actions"]), actions["pagination"])
+   EOF
+   ```
+
+2. If the count and the list now agree, Congress.gov caught up; the next run saves the bill. If the list's own `pagination` count is higher than what was sent, the paging in `read_actions` is at fault: fix that first. If they still disagree a day or more after `updateDate`, it is Congress.gov's data: leave it, and it is named in every run's failure until they fix it.
