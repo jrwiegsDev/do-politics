@@ -552,6 +552,8 @@ The site's icon is a capitol drawn as an SVG (`app/static/favicon.svg`). Safari 
 
 Jinja2 escapes every value it prints, so text from a source, such as a name or a bill summary, is shown as text and can never run as HTML.
 
+Static files are linked by a fingerprint of their contents (`app/assets.py`): templates write `{{ "style.css" | static_url }}`, which becomes `/static/style.css?v=7ec990c92b4c`, the first 12 hex digits of the file's SHA-256. A request with the current fingerprint is answered with `Cache-Control: public, max-age=31536000, immutable`, so a browser keeps the file for a year without asking again; a changed file gets a new fingerprint and so a new address, which no browser has kept. Any other request for a static file (no fingerprint, or an old one) gets `no-cache`: the browser may keep it but must check first, and an unchanged file costs a `304 Not Modified`. Without a `Cache-Control` header, browsers guess how long a copy stays fresh (typically a tenth of the time since the file last changed), and after a deploy a returning visitor could get the new page with the old stylesheet. The fingerprint's cache key includes the file's modified time and size, so editing the stylesheet on a laptop changes the address at once, with no restart, while unchanged files are read only once. A test fails if any template links `/static/` without a fingerprint.
+
 ## Usage counts
 
 The site keeps running daily totals of how it is used, to measure its reach and reliability and to practice analytics on real data. They are added up as they happen, so no row ever describes one visit: there is nothing to delete later because nothing about a visitor is written in the first place. The privacy policy says the same in plain words.

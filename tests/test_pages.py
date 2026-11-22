@@ -19,6 +19,7 @@ from helpers import (
     summary,
 )
 
+from app.assets import static_url
 from app.geocoder import GeocoderUnavailable
 from app.main import app, get_conn
 from app.ratelimit import LOOKUP_LIMIT
@@ -180,7 +181,8 @@ def test_every_page_points_to_the_icon_in_our_own_folder(client):
         page = client.get(path).text
 
         assert (
-            '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in page
+            f'<link rel="icon" href="{static_url("favicon.svg")}" type="image/svg+xml">'
+            in page
         ), path
 
 
@@ -206,11 +208,12 @@ def test_every_page_points_to_png_icons_for_safari_and_iphones(client):
         page = client.get(path).text
 
         assert (
-            '<link rel="icon" href="/static/favicon-32.png" type="image/png"'
+            f'<link rel="icon" href="{static_url("favicon-32.png")}" type="image/png"'
             ' sizes="32x32">' in page
         ), path
         assert (
-            '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">' in page
+            f'<link rel="apple-touch-icon" href="{static_url("apple-touch-icon.png")}">'
+            in page
         )
 
 
