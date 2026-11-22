@@ -1,14 +1,13 @@
 """The DoPolitics API."""
 
 from datetime import date
-from pathlib import Path as FilePath
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Request, Response
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.address import Address
+from app.assets import STATIC_DIR, FingerprintedStaticFiles
 from app.bills import BillType, find_bill
 
 # get_conn is imported so that `from app.main import get_conn` keeps working.
@@ -30,12 +29,9 @@ add_security_headers(app)
 add_request_ids(app)
 
 # The stylesheet and the HTMX script are served from our own folder, so a
-# visitor's browser never has to ask another site for anything.
-app.mount(
-    "/static",
-    StaticFiles(directory=FilePath(__file__).parent / "static"),
-    name="static",
-)
+# visitor's browser never has to ask another site for anything. Pages link
+# them with a fingerprint (app/assets.py), so browsers can keep them a year.
+app.mount("/static", FingerprintedStaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(pages_router)
 
 
