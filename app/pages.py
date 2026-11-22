@@ -30,6 +30,7 @@ from app.pay import (
     salary,
 )
 from app.search import MAX_LENGTH, read_search
+from app.usage import count_bill_view, count_lookup, count_search
 from app.votes import find_attendance, find_policy_areas, find_recent_votes
 from ingest.congress import bill_label, ordinal, today_in_washington
 
@@ -210,6 +211,7 @@ def officials_tile(
         address = Address(street=street, city=city, state=state, zip_code=zip_code)
     except ValidationError:
         # The error itself is not used: its text quotes what was typed.
+        count_lookup(conn, "invalid")
         return message(
             request,
             "Enter a street address with a ZIP code, or with a city and state.",
@@ -221,6 +223,7 @@ def officials_tile(
     # the Census needs limiting.
     wait = lookup_wait(request)
     if wait is not None:
+        count_lookup(conn, "rate_limited")
         response = message(
             request,
             "That's a lot of lookups in a short time. Try again in a minute.",
@@ -233,6 +236,7 @@ def officials_tile(
     try:
         point = geocode(address)
     except GeocoderUnavailable:
+        count_lookup(conn, "unavailable")
         return message(
             request,
             "The address service is unavailable. Try again shortly.",
@@ -241,6 +245,7 @@ def officials_tile(
         )
 
     if point is None:
+        count_lookup(conn, "not_found")
         return message(
             request,
             "Sorry! We couldn't locate that address. Try typing it in again.",
@@ -251,6 +256,7 @@ def officials_tile(
     longitude, latitude = point
     result = lookup(conn, longitude, latitude)
     if result is None:
+        count_lookup(conn, "no_district")
         return message(
             request,
             "That address is not in a congressional district.",
@@ -258,6 +264,8 @@ def officials_tile(
             clear_tiles=True,
         )
 
+    # Only the state is counted; the district, like the address, is not kept.
+    count_lookup(conn, "found", result["district"]["state_fips"])
     return templates.TemplateResponse(request, "_officials.html", result)
 
 
@@ -326,6 +334,10 @@ def bill_rows(
     if not q.strip() and not topic:
         return HTMLResponse("")
     context = bill_search_page(conn, q, topic or None, offset)
+    # Results come as you type, so this counts requests, not searches. A
+    # "More" page continues one already counted.
+    if offset == 0:
+        count_search(conn, found_nothing=not context["bills"])
     return templates.TemplateResponse(request, "_bill_rows.html", context)
 
 
@@ -346,6 +358,10 @@ def bill_tile(
     bill = find_bill(conn, congress, bill_type, bill_number)
     if bill is None:
         return message(request, "That bill is not in our records yet.", 404)
+
+    # A member's vote rows link here with ?member=; Bill Search links without it.
+    opened_from = "votes" if member else "search"
+    count_bill_view(conn, congress, bill_type, bill_number, opened_from)
 
     official = find_official(conn, member) if member else None
     member_votes = (

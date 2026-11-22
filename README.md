@@ -35,7 +35,7 @@ DoPolitics takes a street address and returns every federal official who represe
 
 ## Privacy
 
-Addresses are never stored. An address is sent once to the Census Geocoder, resolved to districts and discarded. It isn't cached, it isn't logged, and it never goes into a URL. The site sets no cookies, runs no analytics and loads nothing from other sites. The full policy, including how IP addresses are handled (held in memory for about a minute by the rate limiter, and kept for 14 days in Render's request logs), is the site's [Privacy Policy](app/templates/privacy.html) at `/privacy`, alongside the [Terms of Use](app/templates/terms.html) at `/terms`.
+Addresses are never stored. An address is sent once to the Census Geocoder, resolved to districts and discarded. It isn't cached, it isn't logged, and it never goes into a URL. The site sets no cookies, uses no analytics service and loads nothing from other sites. It does keep a few daily totals of its own, such as lookups per state and views per bill, with nothing about any visitor attached (see [Usage counts](#usage-counts)). The full policy, including how IP addresses are handled (held in memory for about a minute by the rate limiter, and kept for 14 days in Render's request logs), is the site's [Privacy Policy](app/templates/privacy.html) at `/privacy`, alongside the [Terms of Use](app/templates/terms.html) at `/terms`.
 
 ## Summaries
 
@@ -550,6 +550,36 @@ The stylesheet is written mobile first: its plain rules are for a phone, and `@m
 The site's icon is a capitol drawn as an SVG (`app/static/favicon.svg`). Safari does not reliably use SVG favicons and iPhones use a separate Home Screen icon, so `scripts/favicon_pngs.py` renders the SVG to a 32-pixel PNG and a solid 180-pixel Apple touch icon (`uv run python scripts/favicon_pngs.py` after changing the drawing). `/favicon.ico`, `/apple-touch-icon.png` and `/apple-touch-icon-precomposed.png` answer too, since browsers ask for those paths without reading the page.
 
 Jinja2 escapes every value it prints, so text from a source, such as a name or a bill summary, is shown as text and can never run as HTML.
+
+## Usage counts
+
+The site keeps running daily totals of how it is used, to measure its reach and reliability and to practice analytics on real data. They are added up as they happen, so no row ever describes one visit: there is nothing to delete later because nothing about a visitor is written in the first place. The privacy policy says the same in plain words.
+
+| Table | One row per | Counts |
+|---|---|---|
+| `lookup_counts` | day, outcome, state | Address lookups. The outcome is `found`, `not_found` (the Census couldn't place the address), `no_district`, `unavailable` (the Census was down), `rate_limited` or `invalid` (the form was incomplete). Only a found lookup has a state; a database rule refuses a state on any other outcome. |
+| `bill_view_counts` | day, bill, where it was opened from | Bill tiles opened, from Bill Search (`search`) or from a member's votes (`votes`, the link carries `?member=`). |
+| `search_counts` | day | Bill Search requests, and how many found nothing. |
+| `states` | state | The 56 places with a seat in Congress, with the Census Bureau's region and division (the five territories are labeled `Territories`), so counts roll up to regions in SQL. |
+
+Each count is one statement, `INSERT ... ON CONFLICT DO UPDATE SET lookups = lookup_counts.lookups + 1`, which Postgres runs atomically, so two visitors at the same moment can't lose an increment. `lookup_counts` keys on `UNIQUE NULLS NOT DISTINCT (day, outcome, state_fips)`, so the failed lookups of a day, which have no state, share one row instead of one each. A day ends at midnight Central time (`today()` in `app/usage.py`); the day the clocks change is 23 or 25 hours long.
+
+A count can never change what a visitor gets back. It runs in a savepoint inside the request's transaction, and if it fails, only the count is undone and the error is logged. The JSON `/lookup` commits its count before raising a 404, since the exception rolls back the request's transaction.
+
+Bill Search shows results as you type, so `search_counts` counts requests, not searches: typing "veterans" can be several requests. A "Show more bills" page continues a request already counted and is left out. Bill views from search are the cleaner measure of a search that found what someone wanted. The search words themselves are never stored.
+
+Lookups by region this month, as an example of reading them:
+
+```sql
+SELECT s.region, sum(c.lookups) AS lookups
+FROM lookup_counts c
+JOIN states s ON s.fips = c.state_fips
+WHERE c.outcome = 'found' AND c.day >= date_trunc('month', current_date)
+GROUP BY ROLLUP (s.region)
+ORDER BY s.region NULLS LAST;
+```
+
+`ROLLUP` adds a final row, with a NULL region, holding the total.
 
 ## Tests
 

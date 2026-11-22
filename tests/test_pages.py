@@ -113,7 +113,9 @@ def test_privacy_policy_says_where_the_address_goes_and_what_is_kept(client):
     assert "We never store your address." in page
     assert "for about a minute" in page
     assert "for 14 days" in page
-    assert "No accounts, no cookies, no analytics, no tracking" in page
+    assert "No accounts, no cookies, no analytics services, no tracking" in page
+    assert "<h3>Usage counts</h3>" in page
+    assert "A lookup that fails records no state at all." in page
 
 
 def test_terms_of_use_say_to_check_official_sources(client):
