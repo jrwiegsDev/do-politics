@@ -84,7 +84,8 @@ def test_clear_empties_the_fields_and_every_tile(page: Page):
     page.get_by_role("button", name="Example Act").click()
     expect(page.locator("#bill-tile")).not_to_be_empty()
 
-    page.get_by_role("button", name="Clear").click()
+    # Bill Search has a Clear button too, so this finds the address form's.
+    page.locator("#address-tile").get_by_role("button", name="Clear").click()
 
     for label in ("Street address", "City", "State", "ZIP code"):
         expect(page.get_by_label(label)).to_have_value("")
