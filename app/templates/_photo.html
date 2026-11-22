@@ -6,6 +6,6 @@
 {% if official.has_photo %}
 <img class="{{ size }}" src="/photos/{{ official.bioguide_id }}.jpg" alt="" width="225" height="275">
 {% else %}
-<img class="{{ size }}" src="/static/no-photo.svg" alt="" width="225" height="275">
+<img class="{{ size }}" src="{{ "no-photo.svg" | static_url }}" alt="" width="225" height="275">
 {% endif %}
 {%- endmacro %}

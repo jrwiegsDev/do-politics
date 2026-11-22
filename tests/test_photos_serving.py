@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import JPEG, REP_13, SENATOR_A, add, add_photo
 
+from app.assets import static_url
 from app.main import app, get_conn
 from app.photos import etag_for, etag_matches, find_photo
 from ingest.members import UPSERT_SQL as UPSERT_MEMBER_SQL
@@ -134,7 +135,7 @@ def test_officials_tile_shows_a_stored_photo_and_a_placeholder_for_the_rest(
 
     assert 'src="/photos/T000012.jpg"' in page
     assert 'src="/photos/T000010.jpg"' not in page
-    assert 'src="/static/no-photo.svg"' in page
+    assert f'src="{static_url("no-photo.svg")}"' in page
 
 
 def test_a_photo_has_empty_alt_text_because_the_name_is_beside_it(

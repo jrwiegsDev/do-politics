@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.address import Address
+from app.assets import static_url
 from app.bills import (
     BillType,
     find_bill,
@@ -82,6 +83,8 @@ templates.env.filters["vote_date"] = vote_date
 templates.env.filters["bill_label"] = bill_label
 templates.env.filters["dollars"] = dollars
 templates.env.filters["ordinal"] = ordinal
+# Templates link static files as {{ "style.css" | static_url }}.
+templates.env.filters["static_url"] = static_url
 
 
 def vote_page(
