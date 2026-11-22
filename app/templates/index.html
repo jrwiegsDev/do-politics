@@ -82,6 +82,12 @@
           {% endfor %}
         </select>
       </div>
+      {# Like the address form's Clear: the reset puts the box and the topic
+         back as the page loaded them, and HTMX asks for an empty results
+         list and bill tile. The page has two Clear buttons, so this one's
+         name for screen readers says which it is. #}
+      <button type="reset" class="search-clear" aria-label="Clear bill search"
+              hx-get="/tiles/bills/clear" hx-swap="none">Clear</button>
     </form>
     <ul class="votes" id="bill-results"></ul>
   </section>

@@ -197,6 +197,12 @@ def clear_tiles(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "_clear_all.html")
 
 
+@router.get("/tiles/bills/clear")
+def clear_bill_search(request: Request) -> HTMLResponse:
+    """Return Bill Search's results and the bill tile emptied, for its Clear button."""
+    return templates.TemplateResponse(request, "_clear_search.html")
+
+
 @router.post("/tiles/officials")
 def officials_tile(
     request: Request,

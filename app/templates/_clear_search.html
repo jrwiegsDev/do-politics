@@ -1,0 +1,6 @@
+{# Bill Search's Clear button's answer: the results list and the bill tile
+   emptied out of band, the way the address form's Clear empties the tiles.
+   Each must hold nothing, for the stylesheet's :empty rule. The officials
+   and member tiles are left alone. #}
+<ul class="votes" id="bill-results" hx-swap-oob="innerHTML"></ul>
+<section id="bill-tile" hx-swap-oob="innerHTML"></section>

@@ -436,6 +436,38 @@ def test_clear_returns_every_tile_below_the_address_empty_and_nothing_else(clien
     assert rest.strip() == ""
 
 
+CLEARS_RESULTS = '<ul class="votes" id="bill-results" hx-swap-oob="innerHTML"></ul>'
+
+
+def test_bill_search_has_its_own_clear_button_named_apart_from_the_address_one(
+    client,
+):
+    page = " ".join(client.get("/").text.split())
+
+    assert (
+        '<button type="reset" class="search-clear" aria-label="Clear bill search"'
+        ' hx-get="/tiles/bills/clear" hx-swap="none">Clear</button>' in page
+    )
+    # It sits inside the search form, so its reset empties only that form.
+    search_form = page.split('id="search-tile"')[1].split("</form>")[0]
+    assert 'class="search-clear"' in search_form
+
+
+def test_bill_search_clear_empties_the_results_and_the_bill_tile_and_nothing_else(
+    client,
+):
+    response = client.get("/tiles/bills/clear")
+
+    assert response.status_code == 200
+    rest = response.text
+    for section in (CLEARS_RESULTS, CLEARS_BILL):
+        assert section in rest
+        rest = rest.replace(section, "")
+    assert rest.strip() == ""
+    assert CLEARS_OFFICIALS not in response.text
+    assert CLEARS_MEMBER not in response.text
+
+
 def test_officials_tile_empties_the_member_and_bill_tiles(client, conn, monkeypatch):
     add(conn, seated(SENATOR_A))
     geocode_to(monkeypatch, CAPITOL)
