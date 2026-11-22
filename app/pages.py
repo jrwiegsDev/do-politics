@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, Path, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
+from jinja2.runtime import Context
 from pydantic import ValidationError
 
 from app.address import Address
@@ -63,6 +65,19 @@ def long_date(day: date) -> str:
     return f"{day:%b} {day.day}, {day.year}"
 
 
+@pass_context
+def static_url_filter(context: Context, name: str) -> str:
+    """Return a static file's fingerprinted address, worked out at each render.
+
+    Jinja works out a filter given fixed text once, when it first compiles a
+    template, and reuses the answer until the template file changes, so an
+    edited stylesheet would keep its old address until a restart. It never
+    does that for a filter that asks for the page's context, which is why
+    this one asks for it without using it.
+    """
+    return static_url(name)
+
+
 def dollars(amount: int) -> str:
     """Return a whole-dollar amount written out, such as '$174,000'."""
     return f"${amount:,}"
@@ -82,7 +97,7 @@ templates.env.filters["bill_label"] = bill_label
 templates.env.filters["dollars"] = dollars
 templates.env.filters["ordinal"] = ordinal
 # Templates link static files as {{ "style.css" | static_url }}.
-templates.env.filters["static_url"] = static_url
+templates.env.filters["static_url"] = static_url_filter
 
 
 def vote_page(
