@@ -623,6 +623,35 @@ def test_member_tile_has_one_year_pill_per_year_with_the_newest_chosen(client, c
     assert tile.count('name="year-T000001"') == 2
 
 
+def test_member_tile_says_how_long_the_member_has_served(client, conn):
+    add_pat(conn)
+    for position, (start, end) in enumerate(
+        [
+            ("2021-01-03", "2023-01-03"),
+            ("2023-01-03", "2025-01-03"),
+            ("2025-01-03", "2027-01-03"),
+        ]
+    ):
+        conn.execute(
+            "INSERT INTO official_terms (bioguide_id, position, chamber, state,"
+            " district, party, starts_on, ends_on) VALUES"
+            " (%s, %s, 'house', 'IL', 13, 'Democrat', %s, %s)",
+            [PAT, position, start, end],
+        )
+
+    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+
+    assert '<ul class="service"> <li>House: 3rd term (since 2021)</li> </ul>' in tile
+
+
+def test_member_tile_with_no_terms_stored_leaves_the_line_out(client, conn):
+    add_pat(conn)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert 'class="service"' not in tile
+
+
 def test_member_tile_says_when_no_roll_calls_are_on_record(client, conn):
     add_pat(conn)
 

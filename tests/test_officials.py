@@ -1,7 +1,9 @@
 """Tests for the officials adapter."""
 
 from datetime import date
+from typing import Any
 
+import psycopg
 import pytest
 from helpers import last_run
 
@@ -13,9 +15,10 @@ from ingest.officials import (
     load,
     read_officials,
     to_row,
+    to_terms,
 )
 
-HOUSE_MEMBER = {
+HOUSE_MEMBER: dict[str, Any] = {
     "id": {"bioguide": "T000001"},
     "name": {"first": "Pat", "last": "Example", "official_full": "Pat Q. Example"},
     "terms": [
@@ -41,7 +44,7 @@ HOUSE_MEMBER = {
     ],
 }
 
-SENATOR = {
+SENATOR: dict[str, Any] = {
     "id": {"bioguide": "T000002"},
     "name": {"first": "Sam", "last": "Sample"},
     "terms": [
@@ -209,13 +212,13 @@ def test_load_adds_the_members_removes_the_departed_and_records_the_run(
     monkeypatch.setattr("ingest.officials.MIN_EXPECTED_MEMBERS", 1)
     monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER, SENATOR])
 
-    loaded, removed = load(committing_conn)
+    loaded, terms, removed = load(committing_conn)
 
     in_office = committing_conn.execute(
         "SELECT bioguide_id FROM officials ORDER BY bioguide_id"
     ).fetchall()
     recorded = last_run(committing_conn)
-    assert (loaded, removed) == (2, 1)
+    assert (loaded, terms, removed) == (2, 3, 1)
     assert in_office == [("T000001",), ("T000002",)]
     assert (recorded["job"], recorded["status"]) == ("officials", "succeeded")
     assert recorded["rows_loaded"] == 2
@@ -235,3 +238,84 @@ def test_load_of_a_short_file_fails_the_run_and_removes_nobody(
     assert in_office == [("T000002",)]
     assert (recorded["job"], recorded["status"]) == ("officials", "failed")
     assert recorded["error"].startswith("ValueError: legislators-current has only 1")
+
+
+def test_every_term_becomes_a_row_oldest_first():
+    rows = to_terms(HOUSE_MEMBER)
+
+    assert [(r["position"], r["district"], r["party"]) for r in rows] == [
+        (0, 12, "Republican"),
+        (1, 13, "Democrat"),
+    ]
+    assert rows[0]["chamber"] == "house"
+    assert rows[0]["starts_on"] == date(2023, 1, 3)
+    assert rows[1]["ends_on"] == date(2027, 1, 3)
+
+
+def test_a_senate_term_has_no_district_and_keeps_how_it_began():
+    appointed = SENATOR | {
+        "terms": [SENATOR["terms"][0] | {"how": "appointment"}],
+    }
+
+    (row,) = to_terms(appointed)
+
+    assert (row["chamber"], row["district"], row["how"]) == (
+        "senate",
+        None,
+        "appointment",
+    )
+
+
+def terms_in_db(conn):
+    return conn.execute(
+        "SELECT bioguide_id, position, chamber FROM official_terms"
+        " ORDER BY bioguide_id, position"
+    ).fetchall()
+
+
+def test_load_stores_every_term_and_replaces_them_on_the_next_run(
+    committing_conn, monkeypatch
+):
+    monkeypatch.setattr("ingest.officials.MIN_EXPECTED_MEMBERS", 1)
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER, SENATOR])
+    load(committing_conn)
+    assert terms_in_db(committing_conn) == [
+        ("T000001", 0, "house"),
+        ("T000001", 1, "house"),
+        ("T000002", 0, "senate"),
+    ]
+
+    # The next file lists only the representative's current term.
+    trimmed = HOUSE_MEMBER | {"terms": HOUSE_MEMBER["terms"][1:]}
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [trimmed, SENATOR])
+    load(committing_conn)
+
+    assert terms_in_db(committing_conn) == [
+        ("T000001", 0, "house"),
+        ("T000002", 0, "senate"),
+    ]
+
+
+def test_a_departed_members_terms_go_with_them(committing_conn, monkeypatch):
+    monkeypatch.setattr("ingest.officials.MIN_EXPECTED_MEMBERS", 1)
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER, SENATOR])
+    load(committing_conn)
+
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [SENATOR])
+    load(committing_conn)
+
+    assert terms_in_db(committing_conn) == [("T000002", 0, "senate")]
+
+
+def test_a_failed_run_leaves_the_terms_as_they_were(committing_conn, monkeypatch):
+    monkeypatch.setattr("ingest.officials.MIN_EXPECTED_MEMBERS", 1)
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER, SENATOR])
+    load(committing_conn)
+    broken = SENATOR | {"terms": [SENATOR["terms"][0] | {"end": "2020-01-01"}]}
+    monkeypatch.setattr("ingest.officials.fetch", lambda: [HOUSE_MEMBER, broken])
+
+    # official_terms_dates_check refuses a term that ends before it starts.
+    with pytest.raises(psycopg.errors.CheckViolation):
+        load(committing_conn)
+
+    assert len(terms_in_db(committing_conn)) == 3
