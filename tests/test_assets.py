@@ -88,3 +88,16 @@ def test_no_template_links_a_static_file_without_its_fingerprint():
     # could reach a visitor stale after a deploy that changed it.
     for template in TEMPLATES.glob("*.html"):
         assert '"/static/' not in template.read_text(), template.name
+
+
+def test_a_page_links_the_fingerprint_current_at_each_render(client, monkeypatch):
+    # Jinja works out a filter given fixed text once, when it compiles the
+    # template, and reuses the answer until the template file changes. An
+    # edited stylesheet would then keep its old address until a restart.
+    monkeypatch.setattr(assets, "fingerprint", lambda name: "aaaaaaaaaaaa")
+    first = client.get("/privacy").text
+    monkeypatch.setattr(assets, "fingerprint", lambda name: "bbbbbbbbbbbb")
+    second = client.get("/privacy").text
+
+    assert "/static/style.css?v=aaaaaaaaaaaa" in first
+    assert "/static/style.css?v=bbbbbbbbbbbb" in second
