@@ -551,7 +551,10 @@ def test_member_tile_never_links_to_something_that_is_not_a_web_address(client, 
     assert "javascript:" not in response.text
 
 
-def test_member_tile_shows_attendance_for_the_session(client, conn):
+SALARY_LINK = '<a href="https://www.congress.gov/crs-product/RL30064" rel="noopener">'
+
+
+def test_member_tile_shows_attendance_with_the_votes_counted_in_a_tooltip(client, conn):
     add_pat(conn)
     add_vote(conn, 1, day=5, positions={PAT: "Yea"})
     add_vote(conn, 2, day=6, positions={PAT: "Not Voting"})
@@ -560,21 +563,28 @@ def test_member_tile_shows_attendance_for_the_session(client, conn):
 
     tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
 
-    assert "Attendance: 75.0% (3/4 votes)" in tile
+    # No year in these: "so far" depends on whether the year is over when the
+    # tests run, which the finished-year test covers.
+    assert "Attendance: <span" in tile
+    assert ">75.0%</button>" in tile
+    assert ">3 of 4 votes" in tile
 
 
-def test_member_tile_shows_a_finished_year_s_pay_per_day_voted(client, conn):
+def test_member_tile_shows_a_finished_year_s_pay_with_the_salary_in_a_tooltip(
+    client, conn
+):
     add_pat(conn)
     add_vote(conn, 1, day=5, positions={PAT: "Yea"}, session=1)
     add_vote(conn, 2, day=6, positions={PAT: "Yea"}, session=1)
 
     tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
 
-    assert "Attendance and Pay (Salary = $174,000/year)" in tile
     assert (
-        "<strong>2025</strong> - Attendance: 100.0% (2/2 votes); Pay: about $87,000 per day"
-        in tile
+        'aria-describedby="salary-T000001-2025">$87,000 per day voted</button>' in tile
     )
+    assert f"Salary: {SALARY_LINK}$174,000/year</a>" in tile
+    # A finished year counts every vote, so it is not "so far".
+    assert 'id="votes-T000001-2025">2 of 2 votes</span>' in tile
 
 
 def test_member_tile_pays_a_leader_more(client, conn):
@@ -584,23 +594,74 @@ def test_member_tile_pays_a_leader_more(client, conn):
 
     tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
 
-    assert "(Salary = $223,500/year)" in tile
-    assert "Pay: about $223,500 per day" in tile
+    assert f"Salary: {SALARY_LINK}$223,500/year</a>" in tile
+    assert "$223,500 per day voted</button>" in tile
 
 
-def test_member_tile_compares_pay_with_the_minimum_wage_and_names_its_source(
+def test_member_tile_has_no_minimum_wage_comparison(client, conn):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"})
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    # It waits for a page of its own that compares pay.
+    assert "minimum wage" not in tile
+
+
+def test_member_tile_has_one_year_pill_per_year_with_the_newest_chosen(client, conn):
+    add_pat(conn)
+    add_vote(conn, 1, day=5, positions={PAT: "Yea"}, session=1)
+    add_vote(conn, 2, day=6, positions={PAT: "Yea"}, session=2)
+
+    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+
+    assert tile.count('class="year-pill"') == 2
+    assert tile.index(">2026</label>") < tile.index(">2025</label>")
+    assert 'id="year-T000001-2026" checked>' in tile
+    assert 'id="year-T000001-2025">' in tile
+    # Radio buttons with one name, so the browser keeps exactly one chosen.
+    assert tile.count('name="year-T000001"') == 2
+
+
+def test_member_tile_says_when_no_roll_calls_are_on_record(client, conn):
+    add_pat(conn)
+
+    tile = client.get(f"/tiles/members/{PAT}").text
+
+    assert "No roll calls are on record for this member yet." in tile
+    assert "year-pill" not in tile
+
+
+def test_member_tile_pins_who_the_member_is_their_attendance_and_the_search(
     client, conn
 ):
     add_pat(conn)
     add_vote(conn, 1, day=5, positions={PAT: "Yea"})
 
-    tile = " ".join(client.get(f"/tiles/members/{PAT}").text.split())
+    tile = client.get(f"/tiles/members/{PAT}").text
+    pinned = pinned_block(tile)
 
-    assert (
-        "the federal minimum wage pays $58 a day, or just $15,080 a year, and"
-        " that's before taxes come out." in tile
+    assert "Pat Example" in pinned
+    assert 'class="member-years"' in pinned
+    assert 'id="vote-search"' in pinned
+    assert 'id="topic"' in pinned
+    assert 'id="vote-list"' not in pinned
+
+
+def pinned_block(tile: str) -> str:
+    """Return the HTML inside the member tile's pinned <div>, to its own close."""
+    start = tile.index('<div class="member-pinned">') + len(
+        '<div class="member-pinned">'
     )
-    assert 'href="https://www.congress.gov/crs-product/RL30064"' in tile
+    depth, at = 1, start
+    while depth:
+        opening = tile.find("<div", at)
+        closing = tile.find("</div>", at)
+        if opening != -1 and opening < closing:
+            depth, at = depth + 1, opening + 4
+        else:
+            depth, at = depth - 1, closing + 6
+    return tile[start : at - 6]
 
 
 def test_member_tile_lists_votes_newest_first_with_the_position(client, conn):

@@ -1,16 +1,63 @@
 {% from "_photo.html" import photo %}
-{# Who this is, how to reach them, and how often they vote stay pinned to
-   the top of the tile while the votes scroll beneath, so it is always clear
-   whose votes these are. #}
+{# Pinned to the top of the tile while the votes scroll beneath: who this is,
+   how to reach them, their attendance and pay, and the vote search. So it is
+   always clear whose votes these are, and a search is always in reach. #}
 <div class="member-pinned">
   <div class="member-header">
     {{ photo(official, "photo-large") }}
-    <div>
-      <h2>{{ official.name }}</h2>
-      <p class="official-role">
-        {{ "Senator" if official.chamber == "senate" else "Representative" }}
-        ({{ official.party }}, {{ official.state }})
-      </p>
+    <div class="member-info">
+      <div class="member-top">
+        <div>
+          <h2>{{ official.name }}</h2>
+          <p class="official-role">
+            {{ "Senator" if official.chamber == "senate" else "Representative" }}
+            ({{ official.party }}, {{ official.state }})
+          </p>
+        </div>
+        {% if attendance %}
+        {# One year at a time. The year buttons are radio buttons drawn as
+           pills, so the browser keeps exactly one chosen and arrow keys move
+           between them; the stylesheet shows the chosen year's numbers. The
+           newest year starts chosen. Past four years, this becomes a
+           dropdown. Each number's detail is a tooltip, shown on hover or
+           keyboard focus (a tap on a phone). #}
+        <fieldset class="member-years">
+          <legend class="visually-hidden">Attendance and pay by year</legend>
+          {% for row in attendance %}
+          {% set key = bioguide_id ~ "-" ~ row.year %}
+          <input type="radio" class="year-choice" name="year-{{ bioguide_id }}"
+                 id="year-{{ key }}"{% if loop.first %} checked{% endif %}>
+          <label class="year-pill" for="year-{{ key }}">{{ row.year }}</label>
+          <div class="year-stats">
+            <p>Attendance:
+              <span class="tip">
+                <button type="button" class="tip-trigger" aria-describedby="votes-{{ key }}">
+                  {{- "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%</button>
+                <span class="tip-text" role="tooltip" id="votes-{{ key }}">
+                  {{- row.votes_cast }} of {{ row.roll_calls }} votes
+                  {%- if not row.finished %}, so far{% endif %}</span>
+              </span>
+            </p>
+            {% if row.per_day %}
+            {# The salary links to the Congressional Research Service report
+               it comes from, so this tooltip stays open while the pointer is
+               in it or a key has moved focus to the link. #}
+            <p>Pay:
+              <span class="tip">
+                <button type="button" class="tip-trigger" aria-describedby="salary-{{ key }}">
+                  {{- row.per_day | dollars }} per day voted</button>
+                <span class="tip-text" id="salary-{{ key }}">Salary:
+                  <a href="{{ pay_source_url }}" rel="noopener">{{ salary | dollars }}/year</a></span>
+              </span>
+            </p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </fieldset>
+        {% else %}
+        <p class="vote-none">No roll calls are on record for this member yet.</p>
+        {% endif %}
+      </div>
       {# Only a web address is ever made into a link. #}
       <ul class="contact contact-links">
         {% if official.phone %}
@@ -33,55 +80,36 @@
     </div>
   </div>
 
-  <h3>Attendance and Pay (Salary = {{ salary | dollars }}/year)</h3>
-  {% if attendance %}
-  <ul class="attendance">
-    {% for row in attendance %}
-    <li>
-      <strong>{{ row.year }}{% if not row.finished %} so far{% endif %}</strong> -
-      Attendance: {{ "%.1f" | format(100 * row.votes_cast / row.roll_calls) }}%
-      ({{ row.votes_cast }}/{{ row.roll_calls }} votes)
-      {%- if row.per_day %}; Pay: about {{ row.per_day | dollars }} per day{% endif %}
-    </li>
-    {% endfor %}
-  </ul>
-  <p class="pay-compare">
-    A full-time job at the federal minimum wage pays {{ minimum_wage_day | dollars }}
-    a day, or just {{ minimum_wage_year | dollars }} a year, and that's before taxes
-    come out. <a href="{{ pay_source_url }}" rel="noopener">Pay source</a>
-  </p>
-  {% else %}
-  <p class="vote-none">No roll calls are on record for this member yet.</p>
-  {% endif %}
+  {# Typing a search or choosing a topic asks the server for the matching
+     rows and puts them in the list below. hx-include sends both fields
+     together, so a search keeps its topic and a topic keeps its search. The
+     input event fires on each keystroke and when the topic changes; the delay
+     waits until typing pauses, so one request goes out instead of one per
+     letter. Listing submit as a trigger means pressing Enter runs the search
+     here instead of reloading the page. #}
+  <div class="votes-bar">
+    <h3>Votes</h3>
+    <form class="vote-filters"
+          hx-get="/tiles/members/{{ bioguide_id }}/votes"
+          hx-trigger="input delay:300ms, submit"
+          hx-include="this" hx-target="#vote-list" hx-swap="innerHTML">
+      <div class="vote-filter">
+        <label for="vote-search">Search</label>
+        <input type="search" id="vote-search" name="q" maxlength="200"
+               placeholder="Bill number or words in the title" autocomplete="off">
+      </div>
+      <div class="vote-filter">
+        <label for="topic">Topic</label>
+        <select id="topic" name="topic">
+          <option value="">All topics</option>
+          {% for area in topics %}
+          <option value="{{ area }}">{{ area }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </div>
 </div>
-
-<h3>Votes</h3>
-{# Typing a search or choosing a topic asks the server for the matching rows
-   and puts them in the list below. hx-include sends both fields together, so
-   a search keeps its topic and a topic keeps its search. The input event
-   fires on each keystroke and when the topic changes; the delay waits until
-   typing pauses, so one request goes out instead of one per letter. Listing
-   submit as a trigger means pressing Enter runs the search here instead of
-   reloading the page. #}
-<form class="vote-filters"
-      hx-get="/tiles/members/{{ bioguide_id }}/votes"
-      hx-trigger="input delay:300ms, submit"
-      hx-include="this" hx-target="#vote-list" hx-swap="innerHTML">
-  <div class="vote-filter">
-    <label for="vote-search">Search</label>
-    <input type="search" id="vote-search" name="q" maxlength="200"
-           placeholder="Bill number or words in the title" autocomplete="off">
-  </div>
-  <div class="vote-filter">
-    <label for="topic">Topic</label>
-    <select id="topic" name="topic">
-      <option value="">All topics</option>
-      {% for area in topics %}
-      <option value="{{ area }}">{{ area }}</option>
-      {% endfor %}
-    </select>
-  </div>
-</form>
 
 <ul class="votes" id="vote-list">
   {% include "_vote_rows.html" %}
