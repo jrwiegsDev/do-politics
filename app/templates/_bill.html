@@ -1,4 +1,7 @@
-<p class="bill-label">{{ bill.bill_type | bill_label(bill.bill_number) }}</p>
+{# data-opened-from says where the bill was opened: the stylesheet puts a
+   bill opened from Bill Search under the search, and one opened from a
+   member's votes under the member. #}
+<p class="bill-label" data-opened-from="{{ opened_from }}">{{ bill.bill_type | bill_label(bill.bill_number) }}</p>
 <h2>{{ bill.title }}</h2>
 
 <dl class="bill-facts">

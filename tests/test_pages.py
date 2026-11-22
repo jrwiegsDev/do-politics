@@ -837,6 +837,19 @@ def test_opening_a_member_empties_the_bill_tile(client, conn):
     assert CLEARS_MEMBER not in tile
 
 
+def test_bill_tile_says_whether_it_was_opened_from_search_or_votes(client, conn):
+    # The stylesheet reads this to put the bill under Bill Search or under
+    # the member.
+    add_members(conn)
+    add_bill(conn)
+
+    from_search = client.get(BILL).text
+    from_votes = client.get(BILL, params={"member": "T000001"}).text
+
+    assert 'data-opened-from="search"' in from_search
+    assert 'data-opened-from="votes"' in from_votes
+
+
 def test_bill_tile_shows_the_bill_its_sponsor_and_where_it_stands(client, conn):
     add_members(conn)
     add_bill(conn)

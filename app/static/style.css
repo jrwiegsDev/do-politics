@@ -110,72 +110,51 @@ body {
   margin-top: 0.5rem;
 }
 
-/* The tiles. One column to start with: the address form, then Bill Search,
-   which works without an address. When the member tile holds anything, the
-   officials tile and the member tile share a row, and the bill tile runs
-   the full width underneath. */
+/* The tiles. One column to start with, in the page's own order: the
+   address form, the officials, the member, the bill, then Bill Search. A
+   tile with nothing in it is hidden (.tile:empty below) and takes no room,
+   so with no address looked up Bill Search sits right under the form. Grid
+   items are placed in that order, with no named slots: an empty named slot
+   would still add a gap where its tile would be. */
 .tiles {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas:
-    "address"
-    "search"
-    "officials"
-    "member"
-    "bill";
   gap: 1rem;
   max-width: 40rem;
   margin: 0 auto;
 }
 
-#address-tile {
-  grid-area: address;
+/* A bill opened from Bill Search goes under the search, next to where it
+   was chosen, instead of above it with the page jumping up. Its tile says
+   where it was opened (data-opened-from in _bill.html), and order: 1 puts it
+   after every tile left at the default of 0. A bill opened from a member's
+   votes keeps its place under the member. The order is only visual; the
+   HTML keeps the bill tile before Bill Search. */
+#bill-tile:has([data-opened-from="search"]) {
+  order: 1;
 }
 
-/* With no address looked up, only Bill Search can have opened a bill. The
-   empty officials and member rows are left out, since an empty grid row
-   still adds a gap above the bill tile. */
-.tiles:has(#officials-tile:empty) {
-  grid-template-areas:
-    "address"
-    "search"
-    "bill";
-}
-
-#search-tile {
-  grid-area: search;
-}
-
-#officials-tile {
-  grid-area: officials;
-}
-
-#member-tile {
-  grid-area: member;
-}
-
-#bill-tile {
-  grid-area: bill;
-}
-
+/* When the member tile holds anything on a wide screen, the officials and
+   the member share a row and every other tile runs the full width. */
 @media (min-width: 50rem) {
   .tiles:has(#member-tile:not(:empty)) {
     max-width: none;
     grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-    grid-template-areas:
-      "address   address"
-      "search    search"
-      "officials member"
-      "bill      bill";
+  }
+
+  .tiles:has(#member-tile:not(:empty)) > :not(#officials-tile, #member-tile) {
+    grid-column: 1 / -1;
   }
 }
 
 /* After a lookup the greeting steps aside. On a wide screen the page is
    laid out to fit one screen: the address form folds into one row, and once
    a member is chosen the officials and member tiles share a fixed height
-   and scroll inside themselves. When the bill tile opens, the two above it
-   shrink a little and the bill tile gets most of a screen of its own, since
-   it holds the most reading; the page scrolls down to it. On a short screen
+   and scroll inside themselves. When a bill opens from a member's votes,
+   the two above it shrink a little and the bill tile gets most of a screen
+   of its own, since it holds the most reading; the page scrolls down to it.
+   A bill opened from Bill Search sits below the search instead, so the
+   tiles above keep their height. On a short screen
    the clamp() minimums win. On a phone none of that applies: each tile is
    as tall as what it holds, and the page scrolls. Fixed heights there left
    empty space under the officials and let the member's pinned details,
@@ -208,8 +187,8 @@ body {
     height: clamp(18rem, 62vh, 44rem);
   }
 
-  .tiles:has(#bill-tile:not(:empty)) #officials-tile,
-  .tiles:has(#bill-tile:not(:empty)) #member-tile {
+  .tiles:has(#bill-tile [data-opened-from="votes"]) #officials-tile,
+  .tiles:has(#bill-tile [data-opened-from="votes"]) #member-tile {
     height: clamp(22rem, 55vh, 40rem);
   }
 

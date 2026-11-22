@@ -375,5 +375,10 @@ def bill_tile(
         if official and member
         else []
     )
-    context = {"bill": bill, "official": official, "member_votes": member_votes}
+    context = {
+        "bill": bill,
+        "official": official,
+        "member_votes": member_votes,
+        "opened_from": opened_from,
+    }
     return templates.TemplateResponse(request, "_bill.html", context)
