@@ -13,6 +13,15 @@
             {{ "Senator" if official.chamber == "senate" else "Representative" }}
             ({{ official.party }}, {{ official.state }})
           </p>
+          {# How long they have served, one line per chamber, the current one
+             first (app/service.py). #}
+          {% if service %}
+          <ul class="service">
+            {% for line in service %}
+            <li>{{ line }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
         </div>
         {% if attendance %}
         {# One year at a time. The year buttons are radio buttons drawn as

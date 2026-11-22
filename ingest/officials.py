@@ -1,4 +1,4 @@
-"""Load sitting members of Congress from congress-legislators into the officials table.
+"""Load sitting members of Congress, and every term each has served, from congress-legislators.
 
 Usage:
     uv run --env-file .env python -m ingest.officials
@@ -53,6 +53,23 @@ DO UPDATE SET
     leadership_titles = EXCLUDED.leadership_titles,
     source = EXCLUDED.source,
     updated_at = now();
+"""
+
+# A member's terms are replaced as a set: the file's list is the whole
+# history, so rows from an earlier run are deleted, not merged.
+DELETE_TERMS_SQL = """
+DELETE FROM official_terms
+WHERE bioguide_id = ANY(%(bioguide_ids)s);
+"""
+
+INSERT_TERM_SQL = """
+INSERT INTO official_terms (
+    bioguide_id, position, chamber, state, district, party, starts_on, ends_on, how
+)
+VALUES (
+    %(bioguide_id)s, %(position)s, %(chamber)s, %(state)s, %(district)s, %(party)s,
+    %(starts_on)s, %(ends_on)s, %(how)s
+);
 """
 
 DELETE_DEPARTED_SQL = """
@@ -131,37 +148,67 @@ def to_row(member: dict, on_date: date | None = None) -> dict:
     }
 
 
-def read_officials() -> list[dict]:
-    """Download and transform every member, refusing a file that is too short."""
-    rows = [to_row(member) for member in fetch()]
+def to_terms(member: dict) -> list[dict]:
+    """Turn one member record's terms into rows for official_terms, oldest first.
+
+    A partial term reached by appointment or special election is its own
+    row, as in the file; how says which, when the file does.
+    """
+    bioguide_id = member["id"]["bioguide"]
+    return [
+        {
+            "bioguide_id": bioguide_id,
+            "position": position,
+            "chamber": "senate" if term["type"] == "sen" else "house",
+            "state": term["state"],
+            "district": term["district"] if term["type"] == "rep" else None,
+            "party": term["party"],
+            "starts_on": date.fromisoformat(term["start"]),
+            "ends_on": date.fromisoformat(term["end"]),
+            "how": term.get("how"),
+        }
+        for position, term in enumerate(member["terms"])
+    ]
+
+
+def read_officials() -> tuple[list[dict], list[dict]]:
+    """Download and transform every member and their terms.
+
+    Refuses a file that is too short, before anything is written.
+    """
+    members = fetch()
+    rows = [to_row(member) for member in members]
     if len(rows) < MIN_EXPECTED_MEMBERS:
         raise ValueError(
             f"{SOURCE} has only {len(rows)} members; expected at least {MIN_EXPECTED_MEMBERS}"
         )
 
-    return rows
+    terms = [term for member in members for term in to_terms(member)]
+    return rows, terms
 
 
-def load(conn) -> tuple[int, int]:
-    """Upsert every member and remove the departed, as one recorded run.
+def load(conn) -> tuple[int, int, int]:
+    """Upsert every member, replace their terms and remove the departed, as one run.
 
-    Returns how many members were loaded and how many were removed.
+    It is one transaction, so the officials and their terms never disagree.
+    A departed member's terms go with them (ON DELETE CASCADE). Returns how
+    many members were loaded, how many terms, and how many members were
+    removed.
     """
     with record_run(conn, JOB, SOURCE) as run:
-        rows = read_officials()
+        rows, terms = read_officials()
+        bioguide_ids = [row["bioguide_id"] for row in rows]
         with conn.cursor() as cur:
             cur.executemany(UPSERT_SQL, rows)
             cur.execute(
-                DELETE_DEPARTED_SQL,
-                {
-                    "source": SOURCE,
-                    "bioguide_ids": [row["bioguide_id"] for row in rows],
-                },
+                DELETE_DEPARTED_SQL, {"source": SOURCE, "bioguide_ids": bioguide_ids}
             )
             removed = cur.rowcount
+            cur.execute(DELETE_TERMS_SQL, {"bioguide_ids": bioguide_ids})
+            cur.executemany(INSERT_TERM_SQL, terms)
         run.rows_loaded = len(rows)
 
-    return len(rows), removed
+    return len(rows), len(terms), removed
 
 
 def main() -> None:
@@ -175,7 +222,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.dry_run:
-        rows = read_officials()
+        rows, terms = read_officials()
         for row in rows:
             print(
                 row["bioguide_id"],
@@ -183,12 +230,16 @@ def main() -> None:
                 row["district_code"] or "senate",
                 row["name"],
             )
-        print(f"{len(rows)} officials read from {SOURCE}; nothing written")
+        print(
+            f"{len(rows)} officials and {len(terms)} terms read from {SOURCE};"
+            " nothing written"
+        )
         return
 
     with connect() as conn:
-        loaded, removed = load(conn)
+        loaded, terms, removed = load(conn)
     print(f"{loaded} officials loaded from {SOURCE}, {removed} removed")
+    print(f"{terms} terms loaded for them")
 
 
 if __name__ == "__main__":

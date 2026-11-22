@@ -54,3 +54,17 @@ def find_official(conn: psycopg.Connection, bioguide_id: str) -> dict | None:
     """Return the sitting member with this Bioguide ID, or None if nobody holds a seat."""
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(FIND_OFFICIAL_SQL, {"bioguide_id": bioguide_id}).fetchone()
+
+
+FIND_TERMS_SQL = """
+SELECT chamber, starts_on, ends_on
+FROM official_terms
+WHERE bioguide_id = %(bioguide_id)s
+ORDER BY position;
+"""
+
+
+def find_terms(conn: psycopg.Connection, bioguide_id: str) -> list[dict]:
+    """Return every term a sitting member has served, oldest first."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(FIND_TERMS_SQL, {"bioguide_id": bioguide_id}).fetchall()

@@ -24,13 +24,14 @@ from app.bills import (
 from app.deps import Conn, lookup_wait
 from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
-from app.officials import find_official
+from app.officials import find_official, find_terms
 from app.pay import (
     PAY_SOURCE_URL,
     pay_for_session,
     salary,
 )
 from app.search import MAX_LENGTH, read_search
+from app.service import service_lines
 from app.usage import count_bill_view, count_lookup, count_search
 from app.votes import find_attendance, find_policy_areas, find_recent_votes
 from ingest.congress import bill_label, ordinal, today_in_washington
@@ -311,6 +312,7 @@ def member_tile(request: Request, conn: Conn, bioguide_id: BioguideId) -> HTMLRe
     context = vote_page(conn, bioguide_id, topic=None, offset=0) | {
         "official": official,
         "attendance": attendance,
+        "service": service_lines(find_terms(conn, bioguide_id)),
         "salary": yearly,
         "topics": find_policy_areas(conn, bioguide_id),
         "pay_source_url": PAY_SOURCE_URL,
