@@ -24,8 +24,6 @@ from app.geocoder import GeocoderUnavailable, geocode
 from app.lookup import lookup
 from app.officials import find_official
 from app.pay import (
-    MINIMUM_WAGE_DAY,
-    MINIMUM_WAGE_YEAR,
     PAY_SOURCE_URL,
     pay_for_session,
     salary,
@@ -300,8 +298,6 @@ def member_tile(request: Request, conn: Conn, bioguide_id: BioguideId) -> HTMLRe
         "attendance": attendance,
         "salary": yearly,
         "topics": find_policy_areas(conn, bioguide_id),
-        "minimum_wage_day": MINIMUM_WAGE_DAY,
-        "minimum_wage_year": MINIMUM_WAGE_YEAR,
         "pay_source_url": PAY_SOURCE_URL,
     }
     return templates.TemplateResponse(request, "_member.html", context)

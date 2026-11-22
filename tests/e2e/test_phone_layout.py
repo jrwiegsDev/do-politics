@@ -7,6 +7,7 @@ pinned. These tests check both sides of the breakpoint.
 """
 
 import pytest
+from helpers import REP_13, add_vote
 from playwright.sync_api import Page, ViewportSize, expect
 
 pytestmark = pytest.mark.usefixtures("illinois_officials", "census_finds_the_capitol")
@@ -14,6 +15,8 @@ pytestmark = pytest.mark.usefixtures("illinois_officials", "census_finds_the_cap
 # The iPhone SE's screen in CSS pixels, the narrowest phone in common use.
 PHONE: ViewportSize = {"width": 375, "height": 667}
 WIDE: ViewportSize = {"width": 1280, "height": 800}
+
+REP = REP_13["bioguide_id"]
 
 # Longer than any real topic, standing in for the longest one in the list.
 LONG_TOPIC = "Armed Forces and National Security, Science, Technology, Communications"
@@ -151,3 +154,96 @@ def test_on_a_wide_screen_the_member_s_details_stay_pinned_in_a_scrolling_tile(
     )
 
     assert styles == {"pinned": "sticky", "overflow": "auto"}
+
+
+def test_on_a_wide_screen_the_pinned_details_leave_room_for_two_votes(page: Page):
+    # Pinned: the photo, name, attendance and pay, contact, and the vote
+    # search. A vote row with a one-line title is about 90 px tall.
+    open_a_member(page, WIDE)
+
+    pinned, tile = page.evaluate(
+        """() => [document.querySelector('.member-pinned').offsetHeight,
+                  document.querySelector('#member-tile').clientHeight]"""
+    )
+
+    assert tile - pinned >= 2 * 90
+
+
+def test_the_vote_search_stays_in_reach_after_scrolling_the_votes(
+    page: Page, committing_conn
+):
+    # Enough votes that the list scrolls inside the tile.
+    for roll in range(2, 12):
+        add_vote(committing_conn, roll, day=roll + 5, positions={REP: "Yea"})
+    committing_conn.commit()
+    open_a_member(page, WIDE)
+    member = page.locator("#member-tile")
+    scrolled = member.evaluate(
+        "tile => { tile.scrollTop = tile.scrollHeight; return tile.scrollTop; }"
+    )
+    assert scrolled > 0
+
+    search = page.get_by_label("Search", exact=True)
+    expect(search).to_be_in_viewport()
+    box = search.bounding_box()
+    tile = member.bounding_box()
+    assert box and tile
+    assert tile["y"] <= box["y"] <= tile["y"] + tile["height"]
+
+
+def test_choosing_a_year_shows_that_years_numbers(page: Page, committing_conn):
+    # A second year: the representative missed the one roll call of 2025.
+    add_vote(committing_conn, 2, day=6, positions={REP: "Not Voting"}, session=1)
+    committing_conn.commit()
+    open_a_member(page, WIDE)
+    member = page.locator("#member-tile")
+    shown = member.locator(".year-stats:visible")
+    expect(member.locator(".year-pill")).to_have_text(["2026", "2025"])
+    expect(shown).to_have_count(1)
+    expect(shown).to_contain_text("Attendance: 100.0%")
+
+    member.locator(".year-pill", has_text="2025").click()
+
+    expect(shown).to_have_count(1)
+    expect(shown).to_contain_text("Attendance: 0.0%")
+
+    # The pills are radio buttons, so arrow keys move between years.
+    member.get_by_role("radio", name="2025").press("ArrowLeft")
+    expect(shown).to_contain_text("Attendance: 100.0%")
+
+
+def test_a_numbers_detail_shows_on_hover_and_keeps_its_link_in_reach(page: Page):
+    open_a_member(page, WIDE)
+    shown = page.locator("#member-tile .year-stats:visible")
+    salary = shown.locator(".tip-text").nth(1)
+    expect(salary).to_be_hidden()
+
+    shown.locator(".tip-trigger").nth(1).hover()
+    expect(salary).to_be_visible()
+    expect(salary).to_contain_text("Salary: $174,000/year")
+
+    # Moving the pointer onto the link keeps the box open.
+    link = salary.get_by_role("link", name="$174,000/year")
+    link.hover()
+    expect(link).to_be_visible()
+
+
+def test_a_numbers_detail_shows_on_keyboard_focus(page: Page):
+    open_a_member(page, WIDE)
+    shown = page.locator("#member-tile .year-stats:visible")
+
+    shown.locator(".tip-trigger").first.focus()
+
+    expect(shown.locator(".tip-text").first).to_be_visible()
+    expect(shown.locator(".tip-text").first).to_contain_text("1 of 1 votes")
+
+
+def test_on_a_phone_a_shown_detail_stays_on_the_screen(page: Page):
+    open_a_member(page, PHONE)
+    shown = page.locator("#member-tile .year-stats:visible")
+
+    for index in (0, 1):
+        shown.locator(".tip-trigger").nth(index).focus()
+        box = shown.locator(".tip-text").nth(index).bounding_box()
+        assert box and box["x"] + box["width"] <= PHONE["width"]
+        assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
