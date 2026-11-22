@@ -70,6 +70,13 @@ def conn(database):
     with connect() as conn:
         yield conn
         conn.rollback()
+        # A usage count made with no transaction open commits itself, and
+        # /lookup commits one before a 404, so counts are deleted, not just
+        # rolled back.
+        conn.execute("DELETE FROM lookup_counts")
+        conn.execute("DELETE FROM bill_view_counts")
+        conn.execute("DELETE FROM search_counts")
+        conn.commit()
 
 
 @pytest.fixture

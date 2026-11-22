@@ -20,6 +20,7 @@ from app.members import find_member
 from app.pages import router as pages_router
 from app.photos import etag_for, etag_matches, find_photo
 from app.security import add_security_headers
+from app.usage import count_lookup
 from app.votes import ALL_CATEGORIES, FINAL_CATEGORIES, find_recent_votes
 
 app = FastAPI(title="DoPolitics", lifespan=lifespan)
@@ -97,6 +98,7 @@ def lookup_address(address: Address, conn: Conn, request: Request) -> dict:
     """
     wait = lookup_wait(request)
     if wait is not None:
+        count_lookup(conn, "rate_limited")
         raise HTTPException(
             status_code=429,
             detail=f"Too many lookups. Try again in {wait} seconds.",
@@ -106,21 +108,28 @@ def lookup_address(address: Address, conn: Conn, request: Request) -> dict:
     try:
         point = geocode(address)
     except GeocoderUnavailable:
+        count_lookup(conn, "unavailable")
         raise HTTPException(
             status_code=503,
             detail="The address service is unavailable. Try again shortly.",
         )
 
     if point is None:
+        count_lookup(conn, "not_found")
         raise HTTPException(status_code=404, detail="That address could not be found.")
 
     longitude, latitude = point
     result = lookup(conn, longitude, latitude)
     if result is None:
+        count_lookup(conn, "no_district")
+        # The exception below rolls back the request's transaction, and the
+        # count with it, so the count is committed first.
+        conn.commit()
         raise HTTPException(
             status_code=404, detail="That address is not in a congressional district."
         )
 
+    count_lookup(conn, "found", result["district"]["state_fips"])
     return result
 
 
