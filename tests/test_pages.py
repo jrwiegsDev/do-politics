@@ -1354,6 +1354,78 @@ def test_bill_search_finds_a_bill_by_words_by_its_name_or_by_its_number(client, 
         assert "Veterans Benefits Act" in rows, search
 
 
+def add_titles(conn, bill_number, titles):
+    """Store a made-up bill's other titles, as (title, kind) pairs."""
+    for title, kind in titles:
+        conn.execute(
+            "INSERT INTO bill_titles (bill_id, title, kind)"
+            " SELECT id, %s, %s FROM bills WHERE bill_number = %s",
+            [title, kind, bill_number],
+        )
+
+
+def test_bill_search_finds_a_bill_by_its_popular_name_and_says_so(client, conn):
+    # H.R. 1 is stored under its official title; people call it something else.
+    add_members(conn)
+    add_bill(conn, 1, title="An act to provide for reconciliation.")
+    add_titles(conn, 1, [("One Big Beautiful Bill Act", "popular")])
+
+    rows = " ".join(search_rows(client, "big beautiful bill").split())
+
+    assert "An act to provide for reconciliation." in rows
+    assert '<p class="known-as">Also known as: One Big Beautiful Bill Act</p>' in rows
+
+
+def test_bill_search_finds_a_bill_by_a_title_for_one_part_of_it(client, conn):
+    add_members(conn)
+    add_bill(conn, 1, title="An act to provide for reconciliation.")
+    add_titles(conn, 1, [("FEHB Protection Act of 2025", "portion")])
+
+    rows = search_rows(client, "FEHB protection")
+
+    assert "An act to provide for reconciliation." in rows
+    # A part's name is not what the whole bill is known as.
+    assert "Also known as" not in rows
+
+
+def test_a_short_title_the_same_as_the_stored_one_is_not_repeated(client, conn):
+    add_members(conn)
+    add_bill(conn, 2102, title="Major Richard Star Act")
+    add_titles(conn, 2102, [("Major Richard Star Act", "short")])
+
+    rows = search_rows(client, "richard star")
+
+    assert "Major Richard Star Act" in rows
+    assert "Also known as" not in rows
+
+
+def test_a_popular_name_wins_over_a_short_title_for_also_known_as(client, conn):
+    add_members(conn)
+    add_bill(conn, 1, title="An act to provide for reconciliation.")
+    add_titles(
+        conn,
+        1,
+        [
+            ("Reconciliation Act of 2025", "short"),
+            ("One Big Beautiful Bill Act", "popular"),
+        ],
+    )
+
+    rows = search_rows(client, "reconciliation")
+
+    assert "Also known as: One Big Beautiful Bill Act" in rows
+
+
+def test_the_bill_tile_says_what_the_bill_is_also_known_as(client, conn):
+    add_members(conn)
+    add_bill(conn, 9999, title="An act to provide for reconciliation.")
+    add_titles(conn, 9999, [("One Big Beautiful Bill Act", "popular")])
+
+    tile = client.get(BILL).text
+
+    assert '<p class="known-as">Also known as: One Big Beautiful Bill Act</p>' in tile
+
+
 def test_bill_search_finds_bills_no_vote_names(client, conn):
     add_members(conn)
     add_bill(conn, 1234, title="Quiet Committee Act")

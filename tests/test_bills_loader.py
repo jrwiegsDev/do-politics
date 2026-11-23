@@ -10,19 +10,23 @@ from email.message import Message
 
 import psycopg
 import pytest
-from helpers import add_members, add_vote, last_run
+from helpers import add_bill, add_members, add_vote, last_run
 
 from ingest.bills import (
     NotSettledYet,
     bills_to_download,
+    catch_up_titles,
     fetch_json,
     list_bills,
     load,
     read_bill,
+    read_titles,
     save,
+    title_kind,
     to_action_rows,
     to_bill_row,
     to_summary_row,
+    to_title_rows,
 )
 from ingest.fetch import Download
 
@@ -110,14 +114,29 @@ def listed(number, update_date="2026-11-16", bill_type="HR", congress=119):
     }
 
 
+# H.R. 1's titles as Congress.gov lists them, trimmed: four distinct titles
+# under several types, one of them listed as both popular and short.
+TITLES = [
+    {"titleType": "Display Title", "title": "Example Act"},
+    {"titleType": "Official Title as Introduced", "title": "To do a thing."},
+    {"titleType": "Popular Titles", "title": "Big Example Act"},
+    {"titleType": "Short Title(s) as Passed House", "title": "Big Example Act"},
+    {
+        "titleType": "Short Titles for portions of this bill from ENR (Enrolled) bill text",
+        "title": "Small Part Act of 2025",
+    },
+]
+
+
 class FakeApi:
     """Stand in for fetch_json, and remember each address that was asked for.
 
     The list of a Congress's bills ('bill/119') is answered from listing,
     a page at a time. Any bill asked for is answered with the made-up bill
     under that number, its summaries with the made-up summaries, and its
-    actions with the made-up actions. The query parameters of each request
-    are kept in params. Given a status, every request for a bill fails with
+    actions with the made-up actions, and its titles with the made-up titles
+    (or, given an exception, by raising it). The query parameters of each
+    request are kept in params. Given a status, every request for a bill fails with
     that HTTP status instead.
     """
 
@@ -128,10 +147,12 @@ class FakeApi:
         actions=ACTIONS,
         status=None,
         listing=(),
+        titles=TITLES,
     ):
         self.bill = bill
         self.summaries = summaries
         self.actions = actions
+        self.titles = titles
         self.status = status
         self.listing = list(listing)
         self.asked = []
@@ -155,6 +176,10 @@ class FakeApi:
             return {"summaries": self.summaries}
         if path.endswith("/actions"):
             return {"actions": self.actions}
+        if path.endswith("/titles"):
+            if isinstance(self.titles, Exception):
+                raise self.titles
+            return {"titles": self.titles}
         return {"bill": self.bill | {"number": path.split("/")[3]}}
 
 
@@ -320,6 +345,7 @@ def test_load_saves_each_bill_once_however_many_votes_name_it(
         "bill/119",
         "bill/119/hr/9999",
         "bill/119/hr/9999/summaries",
+        "bill/119/hr/9999/titles",
     ]
     assert (recorded["job"], recorded["status"]) == ("bills", "succeeded")
     assert recorded["rows_loaded"] == 1
@@ -874,3 +900,147 @@ def test_load_stops_at_the_limit_and_the_next_run_carries_on(
 
     assert (first, second) == (2, 1)
     assert count(committing_conn, "bills") == 3
+
+
+# Titles
+
+
+@pytest.mark.parametrize(
+    ("title_type", "kind"),
+    [
+        ("Popular Titles", "popular"),
+        ("Short Title(s) as Passed House", "short"),
+        ("Short Titles as Enacted for portions of this bill", "portion"),
+        (
+            "Short Titles for portions of this bill from ENR (Enrolled) bill text",
+            "portion",
+        ),
+        ("Official Title as Introduced", "official"),
+        ("Display Title", "display"),
+        ("Override Display Title", "display"),
+    ],
+)
+def test_each_congress_gov_title_type_has_a_kind(title_type, kind):
+    assert title_kind(title_type) == kind
+
+
+def test_a_title_listed_under_several_types_is_kept_once_as_the_most_telling():
+    rows = to_title_rows(TITLES)
+
+    assert rows == [
+        {"title": "Example Act", "kind": "display"},
+        {"title": "To do a thing.", "kind": "official"},
+        {"title": "Big Example Act", "kind": "popular"},
+        {"title": "Small Part Act of 2025", "kind": "portion"},
+    ]
+
+
+def test_read_titles_asks_for_every_title_in_one_request(monkeypatch, no_waiting):
+    api = use(monkeypatch, FakeApi())
+
+    rows = read_titles(119, "hr", 1)
+
+    assert api.asked == ["bill/119/hr/1/titles"]
+    assert api.params == [{"limit": 250}]
+    assert len(rows) == 4
+
+
+def stored_titles(conn) -> list[tuple[str, str]]:
+    return conn.execute("SELECT title, kind FROM bill_titles ORDER BY title").fetchall()
+
+
+def downloaded_last_week(conn) -> None:
+    """Date every stored bill's last download to before the listing's change."""
+    conn.execute("UPDATE bills SET updated_at = '2026-11-10 12:00+00'")
+    conn.commit()
+
+
+def test_load_saves_a_bills_titles_with_it_and_replaces_them_next_time(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
+    use(monkeypatch, FakeApi())
+    load(committing_conn, TODAY)
+    assert ("Big Example Act", "popular") in stored_titles(committing_conn)
+    downloaded_last_week(committing_conn)
+
+    renamed = [{"titleType": "Display Title", "title": "Renamed Act"}]
+    use(monkeypatch, FakeApi(titles=renamed, listing=[listed(9999, "2026-11-17")]))
+    load(committing_conn, TODAY)
+
+    assert stored_titles(committing_conn) == [("Renamed Act", "display")]
+
+
+def test_titles_that_cannot_be_read_never_cost_the_bill(
+    committing_conn, monkeypatch, no_waiting, caplog
+):
+    add_members(committing_conn)
+    add_vote(committing_conn, 1, 5, {"T000001": "Yea"})
+    use(monkeypatch, FakeApi())
+    load(committing_conn, TODAY)
+    before = stored_titles(committing_conn)
+    downloaded_last_week(committing_conn)
+
+    use(
+        monkeypatch,
+        FakeApi(titles=TimeoutError("timed out"), listing=[listed(9999, "2026-11-17")]),
+    )
+    with caplog.at_level("WARNING", logger="ingest.bills"):
+        loaded, *_ = load(committing_conn, TODAY)
+
+    assert loaded == 1
+    assert stored_titles(committing_conn) == before
+    assert "titles not read (TimeoutError: timed out)" in caplog.text
+
+
+def bills_without_titles(conn) -> list[int]:
+    return [
+        number
+        for (number,) in conn.execute(
+            "SELECT bill_number FROM bills b WHERE NOT EXISTS"
+            " (SELECT 1 FROM bill_titles t WHERE t.bill_id = b.id)"
+            " ORDER BY bill_number"
+        )
+    ]
+
+
+def test_the_catch_up_reads_titles_for_stored_bills_most_recently_active_first(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    for number in (1, 2, 3):
+        add_bill(committing_conn, number)
+    committing_conn.execute(
+        "UPDATE bills SET latest_action_on = %s WHERE bill_number = 2",
+        [date(2026, 10, 1)],
+    )
+    committing_conn.commit()
+    api = use(monkeypatch, FakeApi())
+
+    done, left, missed = catch_up_titles(committing_conn, limit=2)
+
+    assert (done, left, missed) == (2, 1, [])
+    assert api.asked[0] == "bill/119/hr/2/titles"
+    assert bills_without_titles(committing_conn) == [3]
+    recorded = last_run(committing_conn)
+    assert (recorded["job"], recorded["status"], recorded["rows_loaded"]) == (
+        "bill_titles",
+        "succeeded",
+        2,
+    )
+
+
+def test_the_catch_up_skips_a_bill_whose_titles_fail_and_tries_it_next_run(
+    committing_conn, monkeypatch, no_waiting
+):
+    add_members(committing_conn)
+    add_bill(committing_conn, 1)
+    committing_conn.commit()
+    use(monkeypatch, FakeApi(titles=TimeoutError("timed out")))
+
+    done, left, missed = catch_up_titles(committing_conn)
+
+    assert (done, left) == (0, 1)
+    assert missed == ["H.R. 1 (119th Congress): TimeoutError"]
+    assert bills_without_titles(committing_conn) == [1]

@@ -9,10 +9,24 @@ from app.search import TITLE_QUERY
 
 BillType = Literal["hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"]
 
-FIND_BILL_SQL = """
+# The name a bill is better known by, for "Also known as": its popular
+# title, or else a short title for the whole bill (not a part of it), when
+# that differs from the title it is stored under. NULL when there is none.
+KNOWN_AS_SQL = """
+(SELECT t.title
+ FROM bill_titles t
+ WHERE t.bill_id = b.id
+   AND t.kind IN ('popular', 'short')
+   AND lower(t.title) <> lower(b.title)
+ ORDER BY t.kind = 'popular' DESC, t.title
+ LIMIT 1)
+"""
+
+FIND_BILL_SQL = f"""
 SELECT b.id, b.congress, b.bill_type, b.bill_number, b.title, b.policy_area,
        b.sponsor_bioguide_id, m.name AS sponsor_name,
-       b.introduced_on, b.latest_action_on, b.latest_action, b.source_url
+       b.introduced_on, b.latest_action_on, b.latest_action, b.source_url,
+       {KNOWN_AS_SQL} AS known_as
 FROM bills b
 JOIN members m ON m.bioguide_id = b.sponsor_bioguide_id
 WHERE b.congress = %(congress)s
@@ -116,6 +130,7 @@ WITH voted AS (
     WHERE bill_type IS NOT NULL
 )
 SELECT b.congress, b.bill_type, b.bill_number, b.title, b.latest_action_on,
+       {KNOWN_AS_SQL} AS known_as,
        EXISTS (
            SELECT 1
            FROM bill_actions a
@@ -131,11 +146,23 @@ LEFT JOIN voted vb
 WHERE (%(policy_area)s::text IS NULL OR b.policy_area = %(policy_area)s)
   AND (%(bill_type)s::text IS NULL OR b.bill_type = %(bill_type)s)
   AND (%(bill_number)s::int IS NULL OR b.bill_number = %(bill_number)s)
-  AND (%(words)s::text IS NULL OR b.title_search @@ {TITLE_QUERY})
+  AND (%(words)s::text IS NULL
+       OR b.title_search @@ {TITLE_QUERY}
+       OR EXISTS (
+           SELECT 1
+           FROM bill_titles t
+           WHERE t.bill_id = b.id
+             AND t.title_search @@ {TITLE_QUERY}
+       ))
 ORDER BY became_law DESC,
          voted DESC,
          CASE WHEN %(words)s::text IS NULL THEN 0
-              ELSE ts_rank(b.title_search, {TITLE_QUERY})
+              ELSE greatest(
+                  ts_rank(b.title_search, {TITLE_QUERY}),
+                  (SELECT max(ts_rank(t.title_search, {TITLE_QUERY}))
+                   FROM bill_titles t
+                   WHERE t.bill_id = b.id)
+              )
          END DESC,
          b.latest_action_on DESC NULLS LAST,
          b.congress DESC, b.bill_type, b.bill_number
@@ -217,9 +244,12 @@ def search_bills(
 
     bill_type, bill_number and words come from read_search: a bill as Congress
     writes it, a number alone (any bill type), or words to find in titles,
-    each matching title words that start with it. policy_area narrows the
-    bills to one topic. Each row says whether the bill became law and
-    whether it got a roll call.
+    each matching title words that start with it. A bill matches on its
+    stored title or any title it has gone by (bill_titles), such as "One Big
+    Beautiful Bill Act" for H.R. 1, and ranks by its best-matching title.
+    policy_area narrows the bills to one topic. Each row says whether the
+    bill became law, whether it got a roll call, and the name it is better
+    known by, if any (known_as).
     """
     params = {
         "limit": limit,

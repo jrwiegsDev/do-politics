@@ -376,6 +376,13 @@ a:focus-visible {
   margin: 0;
 }
 
+/* A bill's better-known name, under its official title. */
+.known-as {
+  margin: 0.125rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
 /* Years in office, under the role. */
 .service {
   margin: 0.125rem 0 0;
