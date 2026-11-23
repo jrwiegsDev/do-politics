@@ -6,6 +6,11 @@
   <button type="button" class="vote-title"
           hx-get="/tiles/bills/{{ bill.congress }}/{{ bill.bill_type }}/{{ bill.bill_number }}"
           hx-target="#bill-tile" hx-swap="innerHTML show:top">{{ bill.title }}</button>
+  {# The name the bill is better known by, when its stored title is the
+     long official one: "One Big Beautiful Bill Act" for H.R. 1. #}
+  {% if bill.known_as %}
+  <p class="known-as">Also known as: {{ bill.known_as }}</p>
+  {% endif %}
   <div class="vote-detail">
     {{ bill.bill_type | bill_label(bill.bill_number) }} · {{ bill.congress | ordinal }} Congress
     {%- if bill.became_law %} · <strong>Became law</strong>{% endif %}

@@ -41,10 +41,21 @@ the record before the list catches up, so a bill that changed less than
 SETTLING_TIME ago is left for the next run and reported, and the run still
 succeeds. A short list from a bill that changed longer ago than that fails
 the run, naming the bill.
+
+A bill's titles (its official title, short titles, short titles for parts
+of it, and a popular title such as 'One Big Beautiful Bill Act') are read
+with it and replace its stored set, so Bill Search can find a bill by any
+name it has gone by. They are a supplement: if they cannot be read, the bill
+is still saved, its stored titles are kept, and a later run tries again.
+After the new and changed bills, each run also reads the titles of up to
+TITLES_PER_RUN stored bills that have none yet, most recently active first,
+as its own recorded run, so bills stored before titles were kept are caught
+up over a few nights.
 """
 
 import argparse
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -62,7 +73,10 @@ from ingest.plain_text import html_to_text
 from ingest.runs import record_run
 from ingest.user_agent import USER_AGENT
 
+logger = logging.getLogger(__name__)
+
 JOB = "bills"
+TITLES_JOB = "bill_titles"
 SOURCE = "congress.gov"
 API_ROOT = "https://api.congress.gov/v3"
 
@@ -82,6 +96,19 @@ MOST_PER_REQUEST = 250
 # its record. On 2026-11-20 the record of H.R. 2785 counted 8 actions 25
 # minutes after it changed, while its list of actions still sent the old 5.
 SETTLING_TIME = timedelta(hours=24)
+
+# The titles of this many stored bills with none yet are read each run. At
+# about half a second a request, 4,000 is about half an hour.
+TITLES_PER_RUN = 4000
+
+# Congress.gov's kinds of title, most telling first. A title listed under
+# several kinds (H.R. 1's popular title is also its short title as passed by
+# the House) is stored once, as the first kind it is listed under here.
+TITLE_KINDS = ("popular", "short", "portion", "official", "display")
+
+# What reading a bill's titles can fail with, after fetch_json's retries:
+# an HTTP error or a dropped connection, or an answer without titles in it.
+TITLE_ERRORS = (urllib.error.URLError, TimeoutError, KeyError, ValueError)
 
 BILL_TYPES = {"hr", "s", "hjres", "sjres", "hconres", "sconres", "hres", "sres"}
 
@@ -174,6 +201,33 @@ VALUES (
     %(bill_id)s, %(position)s, %(acted_on)s, %(acted_at)s,
     %(action_code)s, %(action_type)s, %(source)s, %(action_text)s
 );
+"""
+
+
+# A bill's titles are replaced as a set, like its actions.
+DELETE_TITLES_SQL = """
+DELETE FROM bill_titles WHERE bill_id = %(bill_id)s;
+"""
+
+INSERT_TITLE_SQL = """
+INSERT INTO bill_titles (bill_id, title, kind)
+VALUES (%(bill_id)s, %(title)s, %(kind)s);
+"""
+
+# Stored bills whose titles have never been read: every bill has at least
+# one title, so a bill with no rows has not been read yet.
+TITLES_DUE_SQL = """
+SELECT b.id, b.congress, b.bill_type, b.bill_number
+FROM bills b
+WHERE NOT EXISTS (SELECT 1 FROM bill_titles t WHERE t.bill_id = b.id)
+ORDER BY b.latest_action_on DESC NULLS LAST, b.id
+LIMIT %(limit)s;
+"""
+
+TITLES_LEFT_SQL = """
+SELECT count(*)
+FROM bills b
+WHERE NOT EXISTS (SELECT 1 FROM bill_titles t WHERE t.bill_id = b.id);
 """
 
 
@@ -420,8 +474,49 @@ def read_bill(
     return row, [to_summary_row(summary) for summary in summaries], actions
 
 
-def save(conn, bill: dict, summaries: list[dict], actions: list[dict]) -> None:
-    """Upsert one bill and its summaries, and replace its actions.
+def title_kind(title_type: str) -> str:
+    """Return the kind of a Congress.gov title type, such as 'Popular Titles'."""
+    if title_type.startswith("Popular"):
+        return "popular"
+    if "for portions" in title_type:
+        return "portion"
+    if title_type.startswith("Short Title"):
+        return "short"
+    if title_type.startswith("Official Title"):
+        return "official"
+    return "display"
+
+
+def to_title_rows(titles: list[dict]) -> list[dict]:
+    """Return one row per distinct title, as the most telling kind it is listed under."""
+    kinds: dict[str, str] = {}
+    for item in titles:
+        title = item["title"].strip()
+        kind = title_kind(item["titleType"])
+        if title not in kinds or TITLE_KINDS.index(kind) < TITLE_KINDS.index(
+            kinds[title]
+        ):
+            kinds[title] = kind
+    return [{"title": title, "kind": kind} for title, kind in kinds.items()]
+
+
+def read_titles(congress: int, bill_type: str, bill_number: int) -> list[dict]:
+    """Download one bill's titles and return a row for each distinct one."""
+    path = f"bill/{congress}/{bill_type}/{bill_number}/titles"
+    return to_title_rows(fetch_json(path, {"limit": MOST_PER_REQUEST})["titles"])
+
+
+def save_titles(conn, bill_id: int, titles: list[dict]) -> None:
+    """Replace a bill's stored titles. Nothing is committed here."""
+    with conn.cursor() as cur:
+        cur.execute(DELETE_TITLES_SQL, {"bill_id": bill_id})
+        cur.executemany(
+            INSERT_TITLE_SQL, [title | {"bill_id": bill_id} for title in titles]
+        )
+
+
+def save(conn, bill: dict, summaries: list[dict], actions: list[dict]) -> int:
+    """Upsert one bill and its summaries, replace its actions, and return its id.
 
     Nothing is committed here. The caller commits once the whole bill is
     saved, so its actions are swapped in one transaction.
@@ -437,6 +532,7 @@ def save(conn, bill: dict, summaries: list[dict], actions: list[dict]) -> None:
             INSERT_ACTION_SQL,
             [action | {"bill_id": bill_id} for action in actions],
         )
+    return bill_id
 
 
 def bills_due(conn, today: date) -> list[tuple[int, str, int]]:
@@ -504,7 +600,20 @@ def load(
                 unknown_sponsor.append(f"{name}: sponsor {bill['sponsor_bioguide_id']}")
                 continue
 
-            save(conn, bill, summaries, actions)
+            try:
+                titles = read_titles(congress, bill_type, bill_number)
+            except TITLE_ERRORS as error:
+                titles = None
+                logger.warning(
+                    "%s: titles not read (%s: %s); its stored titles are kept",
+                    name,
+                    type(error).__name__,
+                    error,
+                )
+
+            bill_id = save(conn, bill, summaries, actions)
+            if titles is not None:
+                save_titles(conn, bill_id, titles)
             run.rows_loaded += 1
             run.commit(conn)
             found = counted(len(summaries), "summary", "summaries")
@@ -519,6 +628,32 @@ def load(
     return run.rows_loaded, missing, unknown_sponsor, unsettled
 
 
+def catch_up_titles(conn, limit: int = TITLES_PER_RUN) -> tuple[int, int, list[str]]:
+    """Read the titles of stored bills that have none yet, as one recorded run.
+
+    The most recently active bills come first, up to limit. Each bill's
+    titles are committed as soon as they are saved. Returns how many bills
+    got their titles, how many stored bills still have none, and the bills
+    whose titles could not be read (tried again next run).
+    """
+    with record_run(conn, TITLES_JOB, SOURCE) as run:
+        due = conn.execute(TITLES_DUE_SQL, {"limit": limit}).fetchall()
+        missed = []
+        for bill_id, congress, bill_type, bill_number in due:
+            try:
+                titles = read_titles(congress, bill_type, bill_number)
+            except TITLE_ERRORS as error:
+                name = bill_name(congress, bill_type, bill_number)
+                missed.append(f"{name}: {type(error).__name__}")
+                continue
+            save_titles(conn, bill_id, titles)
+            run.rows_loaded += 1
+            run.commit(conn)
+        left = conn.execute(TITLES_LEFT_SQL).fetchone()[0]
+
+    return run.rows_loaded, left, missed
+
+
 def main() -> None:
     configure_logging()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -529,6 +664,7 @@ def main() -> None:
         loaded, missing, unknown_sponsor, unsettled = load(
             conn, today_in_washington(), args.limit
         )
+        caught_up, titles_left, titles_missed = catch_up_titles(conn)
     print(f"{counted(loaded, 'bill')} loaded from {SOURCE}")
     print_list(
         f"{counted(len(missing), 'bill')} not found on Congress.gov, skipped:",
@@ -544,6 +680,18 @@ def main() -> None:
         f"{counted(len(unsettled), 'bill')} skipped until the next run "
         f"(changed on Congress.gov in the last {hours} hours, still being updated there):",
         unsettled,
+    )
+    # Only while stored bills are being caught up; after that, new bills get
+    # their titles with the bill and this says nothing.
+    if caught_up or titles_left:
+        print(
+            f"Titles read for {counted(caught_up, 'stored bill')} that had none;"
+            f" {counted(titles_left, 'stored bill')} still to do"
+        )
+    print_list(
+        f"{counted(len(titles_missed), 'bill')} whose titles could not be read,"
+        " tried again next run:",
+        titles_missed,
     )
 
 

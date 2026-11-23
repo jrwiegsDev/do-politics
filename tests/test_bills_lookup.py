@@ -37,6 +37,7 @@ def test_bill_comes_back_with_its_sponsors_name(conn):
         "latest_action_on": date(2025, 5, 9),
         "latest_action": "Became Public Law.",
         "source_url": "https://example.test/bill/9999",
+        "known_as": None,
         "summaries": [],
         "generated": None,
         "votes": [],

@@ -3,6 +3,9 @@
    member's votes under the member. #}
 <p class="bill-label" data-opened-from="{{ opened_from }}">{{ bill.bill_type | bill_label(bill.bill_number) }}</p>
 <h2>{{ bill.title }}</h2>
+{% if bill.known_as %}
+<p class="known-as">Also known as: {{ bill.known_as }}</p>
+{% endif %}
 
 <dl class="bill-facts">
   <dt>Sponsor</dt>

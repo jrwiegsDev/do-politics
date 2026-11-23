@@ -57,10 +57,11 @@ def test_bill_name_writes_a_bill_the_way_the_site_does(
     assert bill_name(congress, bill_type, number) == expected
 
 
-def run_bills_main(monkeypatch, returned) -> None:
+def run_bills_main(monkeypatch, returned, titles=(0, 0, [])) -> None:
     monkeypatch.setattr("sys.argv", ["ingest.bills"])
     monkeypatch.setattr(bills, "connect", nullcontext)
     monkeypatch.setattr(bills, "load", lambda conn, today, limit: returned)
+    monkeypatch.setattr(bills, "catch_up_titles", lambda conn: titles)
     bills.main()
 
 
@@ -101,6 +102,26 @@ def test_a_bills_run_with_nothing_skipped_prints_one_line(monkeypatch, capsys):
     run_bills_main(monkeypatch, (400, [], [], []))
 
     assert capsys.readouterr().out == "400 bills loaded from congress.gov\n"
+
+
+def test_a_bills_run_reports_the_titles_catch_up_while_there_is_one(
+    monkeypatch, capsys
+):
+    missed = ["H.R. 7 (119th Congress): TimeoutError"]
+    run_bills_main(monkeypatch, (400, [], [], []), titles=(4000, 15921, missed))
+
+    assert capsys.readouterr().out == (
+        "400 bills loaded from congress.gov\n"
+        "Titles read for 4000 stored bills that had none; 15921 stored bills still to do\n"
+        "1 bill whose titles could not be read, tried again next run:\n"
+        "  H.R. 7 (119th Congress): TimeoutError\n"
+    )
+
+
+def test_a_bills_run_says_nothing_of_titles_once_caught_up(monkeypatch, capsys):
+    run_bills_main(monkeypatch, (400, [], [], []), titles=(0, 0, []))
+
+    assert "Titles" not in capsys.readouterr().out
 
 
 def test_a_photos_run_lists_the_members_with_no_photo_under_a_heading(
