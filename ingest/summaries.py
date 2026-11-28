@@ -60,7 +60,7 @@ from decimal import Decimal
 import anthropic
 from psycopg.rows import dict_row
 
-from ingest.congress import bill_label, bill_name
+from ingest.congress import bill_label, bill_name, ordinal
 from ingest.db import connect
 from ingest.logs import counted
 from ingest.prompt import (
@@ -446,7 +446,7 @@ def user_message(bill: dict) -> str:
     """Return what Claude is given for one bill: its name, the summary's stage, the summary."""
     label = bill_label(bill["bill_type"], bill["bill_number"])
     return (
-        f"Bill: {label}, {bill['title']} ({bill['congress']}th Congress)\n"
+        f"Bill: {label}, {bill['title']} ({ordinal(bill['congress'])} Congress)\n"
         f"Summary stage: {bill['action_desc']}, {bill['action_on'].isoformat()}\n"
         f"\n<crs_summary>\n{bill['summary_text']}\n</crs_summary>"
     )
