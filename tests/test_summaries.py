@@ -42,6 +42,7 @@ from ingest.summaries import (
     sample,
     store,
     submit,
+    user_message,
     within_budget,
     worst_case_cost,
 )
@@ -219,6 +220,23 @@ def test_a_request_carries_the_policy_the_summary_and_the_limits(conn):
     assert "H.R. 9999, Example Act (119th Congress)" in message
     assert "Introduced in House, 2025-01-15" in message
     assert "<crs_summary>\nFirst words.\n</crs_summary>" in message
+
+
+def test_a_request_names_the_congress_the_way_people_say_it():
+    # The 121st Congress is seated in 2029. A plain "th" would make it "121th".
+    bill = {
+        "bill_type": "hr",
+        "bill_number": 9999,
+        "title": "Example Act",
+        "congress": 121,
+        "action_desc": "Introduced in House",
+        "action_on": date(2029, 1, 15),
+        "summary_text": "First words.",
+    }
+
+    message = user_message(bill)
+
+    assert "H.R. 9999, Example Act (121st Congress)" in message
 
 
 def test_the_newest_summary_is_the_one_written_from(conn):
